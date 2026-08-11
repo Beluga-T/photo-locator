@@ -1,0 +1,23 @@
+.env
+
+# ...and the copies people make of it. An editor's .env.save, a hurried
+# .env.bak before trying something, .env.local from a habit picked up
+# elsewhere: each one holds the same API key as .env, and none of them is
+# covered by the line above. .env.example is the one that must stay tracked --
+# it is the documentation.
+.env.*
+!.env.example
+
+# Everything the running app writes about itself: the credentials entered in
+# the settings sheet and every photo that has been analysed. Committing this
+# would publish an API key and someone's pictures.
+data/
+
+# Built by run.py, along with the .requirements-stamp it keeps inside.
+# Disposable: `python run.py --recreate-venv` makes it again.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db

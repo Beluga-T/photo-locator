@@ -1,0 +1,28 @@
+# Secrets never enter the image. .env is supplied at run time via
+# compose's env_file, so a built image can be moved around without
+# carrying an API key inside a layer.
+.env
+.env.*
+!.env.example
+
+# The runtime data directory — saved credentials and analysed photos. It is
+# a mounted volume at run time; baking a developer's copy into the image
+# would ship their key and their pictures to whoever runs it.
+data/
+
+# Host-side virtualenvs would shadow /opt/venv and are the wrong platform.
+.venv/
+venv/
+
+__pycache__/
+*.py[cod]
+
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+compose.yaml
+README.md
+
+.DS_Store
+Thumbs.db

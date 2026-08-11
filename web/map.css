@@ -1,0 +1,208 @@
+﻿/* ═══════════════════════════════════════════════════════════════════
+   Reverse Image Location — map
+   Loaded after styles.css. The Mapbox pane is dressed as a survey
+   inset: hairline frame, mono footnotes, one magenta fix. Colour and
+   radius come only from the tokens declared in styles.css, so both
+   themes follow for free.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Map plate ───────────────────────────────────────────────────── */
+.map {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  overflow: hidden;
+}
+
+.map__canvas {
+  width: 100%;
+  height: clamp(220px, 34vh, 320px);
+  background: var(--raised);
+}
+
+/* Mapbox paints its own focus ring; the plate already shows one. */
+.map__canvas .mapboxgl-canvas:focus { outline: none; }
+
+/* Fullscreen puts the whole card into the fullscreen element, so the canvas
+ * has to stop honouring its fixed height or the map stays letterboxed in the
+ * middle of a black screen. The foot keeps its intrinsic height below it. */
+.map:fullscreen { display: flex; flex-direction: column; border: none; border-radius: 0; }
+.map:fullscreen .map__canvas { flex: 1; height: auto; }
+.map:-webkit-full-screen { display: flex; flex-direction: column; }
+.map:-webkit-full-screen .map__canvas { flex: 1; height: auto; }
+
+/* The map now takes the wheel, so make it obvious it is interactive. */
+.map__canvas { cursor: grab; }
+.map__canvas:active { cursor: grabbing; }
+
+/* ── Fallback + empty state ──────────────────────────────────────── */
+/* `contain`, never `cover`. The Static Images API bakes the Mapbox logo and the
+ * attribution strip into the bottom edge of the frame, and cropping them out
+ * would breach Mapbox's terms. Letterboxing is the price of keeping them. */
+.map__static {
+  display: block;
+  width: 100%;
+  height: clamp(220px, 34vh, 320px);
+  object-fit: contain;
+  background: var(--raised);
+}
+
+.map__none {
+  display: grid;
+  place-items: center;
+  margin: 0.5rem;
+  padding: 1.4rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  text-align: center;
+  text-wrap: balance;
+  color: var(--muted);
+}
+
+/* ── Footnote strip ──────────────────────────────────────────────── */
+.map__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  padding: 0.5rem 0.7rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.map__stat { white-space: nowrap; }
+
+/* The static tier is a picture, not a map. Say so in the tone of a warning
+ * rather than a label, or it reads as decoration. */
+.map__degraded { color: var(--warn); }
+
+/* The static tier has no interactive attribution control, so the credit is
+ * carried here in text as well. Pushed to the right end of the strip. */
+.map__attrib { margin-left: auto; white-space: nowrap; }
+.map__attrib a { color: var(--muted); text-decoration: none; }
+.map__attrib a:hover { color: var(--fix); text-decoration: underline; }
+
+/* The place name is the one thing in the foot worth reading first. */
+.map__stat--name {
+  color: var(--ink-2);
+  letter-spacing: normal;
+  font-family: var(--font-body);
+}
+
+/* ── Fix marker ──────────────────────────────────────────────────── */
+.map__pin { position: relative; width: 26px; height: 26px; pointer-events: none; }
+
+.map__pin-dot {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 7px; height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: var(--fix);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fix) 30%, transparent),
+    0 0 10px 1px color-mix(in srgb, var(--fix) 55%, transparent);
+}
+
+.map__pin-ring {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--fix);
+  border-radius: 50%;
+  transform-origin: center;
+  animation: ril-map-pulse 2.9s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+@keyframes ril-map-pulse {
+  0%   { opacity: 0.62; transform: scale(0.3); }
+  72%  { opacity: 0; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* ── Mapbox chrome ───────────────────────────────────────────────── */
+.map .mapboxgl-ctrl-top-right,
+.map .mapboxgl-ctrl-top-left { margin: 0; padding: 0.5rem; }
+
+.map .mapboxgl-ctrl-group {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: none;
+  overflow: hidden;
+}
+.map .mapboxgl-ctrl-group button { width: 27px; height: 27px; background: transparent; }
+.map .mapboxgl-ctrl-group button + button { border-top: 1px solid var(--line); }
+.map .mapboxgl-ctrl-group button:not(:disabled):hover { background: var(--fix-wash); }
+.map .mapboxgl-ctrl-group button:focus,
+.map .mapboxgl-ctrl-group button:focus:first-child,
+.map .mapboxgl-ctrl-group button:focus:last-child { border-radius: 0; box-shadow: none; }
+.map .mapboxgl-ctrl-group button span { filter: opacity(0.66); }
+
+.map .mapboxgl-ctrl-scale {
+  padding: 0 0.3rem;
+  margin: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-top: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+}
+
+/* ── Attribution — required by Mapbox, restyled only ─────────────── */
+.map .mapboxgl-ctrl-attrib {
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.map .mapboxgl-ctrl-attrib a { color: var(--muted); text-decoration: none; }
+.map .mapboxgl-ctrl-attrib a:hover { color: var(--fix); text-decoration: underline; }
+.map .mapboxgl-ctrl-attrib-button { background-color: transparent; filter: opacity(0.7); }
+.map .mapboxgl-ctrl-logo { opacity: 0.62; transition: opacity 0.15s; }
+.map .mapboxgl-ctrl-logo:hover { opacity: 1; }
+
+/* ── Popup ───────────────────────────────────────────────────────── */
+.map .mapboxgl-popup-content {
+  padding: 0.5rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: none;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+.map .mapboxgl-popup-close-button { background: transparent; color: var(--muted); }
+.map .mapboxgl-popup-close-button:hover { background: transparent; color: var(--fix); }
+.map .mapboxgl-popup-anchor-top .mapboxgl-popup-tip { border-bottom-color: var(--line); }
+.map .mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip { border-top-color: var(--line); }
+.map .mapboxgl-popup-anchor-left .mapboxgl-popup-tip { border-right-color: var(--line); }
+.map .mapboxgl-popup-anchor-right .mapboxgl-popup-tip { border-left-color: var(--line); }
+
+/* ── Control icons on dark ground ────────────────────────────────── */
+/* Mapbox ships black raster icons; invert them so they read on --surface. */
+:root[data-theme="dark"] .map .mapboxgl-ctrl-group button span,
+:root[data-theme="dark"] .map .mapboxgl-ctrl-attrib-button { filter: invert(1) opacity(0.74); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .map .mapboxgl-ctrl-group button span,
+  :root:not([data-theme="light"]) .map .mapboxgl-ctrl-attrib-button { filter: invert(1) opacity(0.74); }
+}
+
+/* ── Motion preferences ──────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .map__pin-ring { animation: none; opacity: 0.42; transform: scale(0.8); }
+  .map .mapboxgl-ctrl-logo { transition: none; }
+}

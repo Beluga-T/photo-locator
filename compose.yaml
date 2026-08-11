@@ -1,0 +1,78 @@
+services:
+  locator:
+    build: .
+    image: reverse-image-location
+
+    # ── The single most important line in this file ──────────────────
+    # Published to 127.0.0.1 only. The app has no authentication of any
+    # kind, and X-RIL-OpenAI-Base makes it issue a server-side HTTP
+    # request to any address a caller names — so anything that can reach
+    # this port can probe the Docker network and the host from inside.
+    # Writing "8000:8000" instead binds every interface. Don't.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # Credentials arrive at run time and are never baked into the image.
+    # `required: false` because a fresh clone HAS no .env — it is gitignored,
+    # and the normal path is to configure everything in the settings sheet,
+    # which persists to the volume below. Without this flag, Compose refuses
+    # to start at all when the file is absent.
+    env_file:
+      - path: .env
+        required: false
+
+    # The root filesystem stays read-only: the app has exactly one place it is
+    # allowed to write, and that is the volume below. Everything else — code,
+    # the venv, /etc — is immutable at run time.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    # The app's own state: the credentials entered in the settings sheet and
+    # the photos that have been analysed. It is a named volume so it survives
+    # `docker compose down` and image rebuilds — that persistence is the whole
+    # point, since a released build has no .env to configure it from.
+    #
+    # It also means this volume holds an API key and someone's pictures. Treat
+    # it like the .env file it replaces: don't copy it around, don't commit a
+    # bind-mounted copy. Swap it for `./data:/data` if you would rather see the
+    # files on the host.
+    volumes:
+      - locator-data:/data
+
+    # No part of this needs a capability, and nothing it runs should ever
+    # gain privileges — there is no setuid binary in the image to begin with.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # A single vision call is long (REQUEST_TIMEOUT_SECONDS defaults to
+    # 240) but not heavy; the ceiling is here to bound a runaway rather
+    # than to size the workload.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+    restart: unless-stopped
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  locator-data:
