@@ -15,7 +15,7 @@ import httpx
 from .config import CLAUDE, Settings
 from .imaging import PreparedImage
 from .overrides import safe_url, scrub
-from .prompt import PRECISION_LEVELS, RESULT_SCHEMA, SYSTEM_PROMPT, USER_INSTRUCTION
+from .prompt import PRECISION_LEVELS, RESULT_SCHEMA, system_prompt, user_instruction
 from .streaming import PartialJSON
 
 log = logging.getLogger("locator.providers")
@@ -289,8 +289,8 @@ def normalize(raw: dict) -> dict:
 # --------------------------------------------------------------------------- Claude
 
 
-def _claude_blocks(image: PreparedImage, include_schema: bool) -> list[dict]:
-    instruction = USER_INSTRUCTION
+def _claude_blocks(image: PreparedImage, include_schema: bool, lang: str = "zh") -> list[dict]:
+    instruction = user_instruction(lang)
     if include_schema:
         instruction += "\n\n严格按以下 JSON schema 输出，只输出 JSON 本身：\n" + json.dumps(
             RESULT_SCHEMA, ensure_ascii=False
@@ -311,7 +311,7 @@ def _claude_text(response: Any) -> str:
 SERVER_SIDE_FALLBACK = "server-side-fallback-2026-07-01"
 
 
-def _structured_kwargs(image: PreparedImage, settings: Settings) -> dict:
+def _structured_kwargs(image: PreparedImage, settings: Settings, lang: str = "zh") -> dict:
     """The request both Claude paths make, streaming or not.
 
     Built in one place so the two ladders cannot drift apart — they already did
@@ -321,8 +321,8 @@ def _structured_kwargs(image: PreparedImage, settings: Settings) -> dict:
     return {
         "model": settings.anthropic_model,
         "max_tokens": MAX_TOKENS,
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": _claude_blocks(image, include_schema=False)}],
+        "system": system_prompt(lang),
+        "messages": [{"role": "user", "content": _claude_blocks(image, include_schema=False, lang=lang)}],
         "output_config": {
             "effort": settings.anthropic_effort,
             "format": {"type": "json_schema", "schema": RESULT_SCHEMA},
@@ -338,21 +338,23 @@ def _with_refusal_fallback(structured: dict) -> dict:
     return {**structured, "betas": [SERVER_SIDE_FALLBACK], "fallbacks": "default"}
 
 
-async def _call_claude(image: PreparedImage, settings: Settings) -> dict:
+async def _call_claude(image: PreparedImage, settings: Settings, lang: str = "zh") -> dict:
     async with anthropic.AsyncAnthropic(
         api_key=settings.anthropic_api_key,
         timeout=settings.request_timeout,
     ) as client:
-        return await _claude_attempts(client, image, settings)
+        return await _claude_attempts(client, image, settings, lang)
 
 
-async def _claude_attempts(client: Any, image: PreparedImage, settings: Settings) -> dict:
+async def _claude_attempts(
+    client: Any, image: PreparedImage, settings: Settings, lang: str = "zh"
+) -> dict:
     """The retry ladder, split out so the client above is always closed.
 
     Left inline it leaked one httpx connection pool per request, because every
     exit from this function is either a raise or a return.
     """
-    structured = _structured_kwargs(image, settings)
+    structured = _structured_kwargs(image, settings, lang)
 
     attempts: list[tuple[str, dict]] = []
     if settings.refusal_fallback:
@@ -360,7 +362,9 @@ async def _claude_attempts(client: Any, image: PreparedImage, settings: Settings
     attempts.append(("stable", structured))
     # Last resort for older SDKs that don't know `output_config`: ask for JSON in the prompt.
     prompt_only = {k: v for k, v in structured.items() if k != "output_config"}
-    prompt_only["messages"] = [{"role": "user", "content": _claude_blocks(image, include_schema=True)}]
+    prompt_only["messages"] = [
+        {"role": "user", "content": _claude_blocks(image, include_schema=True, lang=lang)}
+    ]
     attempts.append(("prompt-only", prompt_only))
 
     last_error: Exception | None = None
@@ -415,14 +419,14 @@ async def _claude_attempts(client: Any, image: PreparedImage, settings: Settings
 # ------------------------------------------------------------ OpenAI-compatible
 
 
-def _openai_messages(image: PreparedImage, include_schema: bool) -> list[dict]:
-    instruction = USER_INSTRUCTION
+def _openai_messages(image: PreparedImage, include_schema: bool, lang: str = "zh") -> list[dict]:
+    instruction = user_instruction(lang)
     if include_schema:
         instruction += "\n\n严格按以下 JSON schema 输出，只输出 JSON 本身：\n" + json.dumps(
             RESULT_SCHEMA, ensure_ascii=False
         )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt(lang)},
         {
             "role": "user",
             "content": [
@@ -436,7 +440,7 @@ def _openai_messages(image: PreparedImage, include_schema: bool) -> list[dict]:
     ]
 
 
-async def _call_openai(image: PreparedImage, settings: Settings) -> dict:
+async def _call_openai(image: PreparedImage, settings: Settings, lang: str = "zh") -> dict:
     url = f"{settings.openai_base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
@@ -446,7 +450,7 @@ async def _call_openai(image: PreparedImage, settings: Settings) -> dict:
     structured = {
         "model": settings.openai_model,
         "max_tokens": 4096,
-        "messages": _openai_messages(image, include_schema=False),
+        "messages": _openai_messages(image, include_schema=False, lang=lang),
         "response_format": {
             "type": "json_schema",
             "json_schema": {"name": "photo_location", "strict": True, "schema": RESULT_SCHEMA},
@@ -456,7 +460,7 @@ async def _call_openai(image: PreparedImage, settings: Settings) -> dict:
     loose = {
         "model": settings.openai_model,
         "max_tokens": 4096,
-        "messages": _openai_messages(image, include_schema=True),
+        "messages": _openai_messages(image, include_schema=True, lang=lang),
         "response_format": {"type": "json_object"},
     }
     bare = {k: v for k, v in loose.items() if k != "response_format"}
@@ -509,14 +513,20 @@ async def _call_openai(image: PreparedImage, settings: Settings) -> dict:
 # --------------------------------------------------------------------------- entry
 
 
-async def locate(image: PreparedImage, settings: Settings) -> dict:
+async def locate(image: PreparedImage, settings: Settings, *, lang: str = "zh") -> dict:
+    # `lang` selects the prompt text and nothing else — "en" asks for English
+    # prose in the narrative fields; every other branch is language-blind.
     if not settings.configured:
         raise LocateError(
             "not_configured",
             "还没有配置模型密钥。点右上角的设置，填入你自己的 API Key 保存即可，不用重启。",
             status=503,
         )
-    raw = await (_call_claude(image, settings) if settings.provider == CLAUDE else _call_openai(image, settings))
+    raw = await (
+        _call_claude(image, settings, lang)
+        if settings.provider == CLAUDE
+        else _call_openai(image, settings, lang)
+    )
     return normalize(raw)
 
 
@@ -557,7 +567,7 @@ PROGRESSIVE_ARRAYS = ("evidence", "alternatives")
 
 
 async def locate_stream(
-    image: PreparedImage, settings: Settings
+    image: PreparedImage, settings: Settings, *, lang: str = "zh"
 ) -> AsyncIterator[tuple[str, Any]]:
     """Yield ("partial", payload) as the answer is written, then ("final", result).
 
@@ -583,6 +593,8 @@ async def locate_stream(
     Only the Claude path streams. A gateway request yields nothing until it is
     finished and then a single ("final", ...) — the shape is identical, so the
     caller needs no branch.
+
+    `lang` selects the prompt text and nothing else, exactly as in locate().
     """
     if not settings.configured:
         raise LocateError(
@@ -592,15 +604,15 @@ async def locate_stream(
         )
 
     if settings.provider != CLAUDE:
-        yield "final", normalize(await _call_openai(image, settings))
+        yield "final", normalize(await _call_openai(image, settings, lang))
         return
 
-    async for event in _stream_claude(image, settings):
+    async for event in _stream_claude(image, settings, lang):
         yield event
 
 
 async def _stream_claude(
-    image: PreparedImage, settings: Settings
+    image: PreparedImage, settings: Settings, lang: str = "zh"
 ) -> AsyncIterator[tuple[str, Any]]:
     """Stream one Claude answer, over the same rungs the plain call would use.
 
@@ -611,7 +623,7 @@ async def _stream_claude(
     `output_config` cannot be rescued mid-stream, and the downgrade to
     `_call_claude` below runs that rung anyway.
     """
-    structured = _structured_kwargs(image, settings)
+    structured = _structured_kwargs(image, settings, lang)
     ladder: list[tuple[str, dict]] = []
     if settings.refusal_fallback:
         ladder.append(("beta", _with_refusal_fallback(structured)))
@@ -709,7 +721,7 @@ async def _stream_claude(
                 # Streaming is an optimisation, never a reason to fail: fall back
                 # to the non-streaming ladder, which knows how to degrade further.
                 log.warning("Claude stream rejected, falling back to the plain call: %s", detail)
-                yield "final", normalize(await _call_claude(image, settings))
+                yield "final", normalize(await _call_claude(image, settings, lang))
                 return
             except anthropic.AuthenticationError as exc:
                 raise LocateError("auth", "ANTHROPIC_API_KEY 无效或已过期。", status=502) from exc

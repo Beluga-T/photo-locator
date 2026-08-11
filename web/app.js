@@ -8,7 +8,9 @@
      recall   keep the session's shots in a rail so they can be revisited
 
    Everything is built with createElement + textContent: model output is
-   untrusted text and must never reach innerHTML. Motion 11 is optional —
+   untrusted text and must never reach innerHTML. Every user-facing string
+   is resolved through window.RIL.i18n (web/i18n.js) at render time, so
+   the readout follows the header's language toggle. Motion 11 is optional —
    if it fails to load, or the visitor asked for reduced motion, every
    element is already in its final state and only the animation is lost.
    ═══════════════════════════════════════════════════════════════════ */
@@ -64,6 +66,28 @@
 
   const prefersReduced = matchMedia("(prefers-reduced-motion: reduce)");
   const M = window.Motion || null;
+
+  /* i18n loads before this file and owns both dictionaries. The shim keeps the
+   * app alive (showing raw keys) if that file somehow failed to load — the
+   * same philosophy as the settings.js shim below: degrade, never throw. */
+  const i18n = (window.RIL && window.RIL.i18n) || {
+    lang: () => "zh",
+    t: (key) => key,
+    onChange: () => {},
+    apply: () => {},
+  };
+  const t = (key, params) => i18n.t(key, params);
+
+  /* In EN mode the Latin name leads when the model provided one; name_zh is
+   * the fallback either way — its semantics are fixed in both languages.
+   * Reads both shapes a place arrives in: {name_zh, name_en} off the API and
+   * the already-plucked {zh, en} pairs headlineOf()/draftHeadline() build. */
+  function placeName(place) {
+    if (!place) return "";
+    const zh = place.zh != null ? place.zh : place.name_zh || "";
+    const en = place.en != null ? place.en : place.name_en || "";
+    return i18n.lang() === "en" && en ? en : zh;
+  }
 
   /** Run a Motion animation, or do nothing if Motion is unavailable/unwanted. */
   function anim(target, keyframes, options = {}) {
@@ -158,6 +182,29 @@
     if (shot.url && shot.url.startsWith("blob:")) URL.revokeObjectURL(shot.url);
   }
 
+  // ── Server errors in the visitor's language ──────────────────────────
+
+  /* Every API error body carries {code, message}, message in Chinese. zh mode
+   * shows it verbatim. EN mode prefers the translated code — but only for the
+   * codes listed here, whose server message is static: the ones left out
+   * (bad_override, bad_json, bad_request, …) carry dynamic detail (the
+   * offending field, the upstream's own words) that a canned English line
+   * would erase, so those fall back to the server's message. */
+  const ERR_CODES = new Set([
+    "rate_limited", "empty", "too_large", "bad_image", "not_configured",
+    "auth", "network", "upstream", "timeout", "refused", "truncated",
+    "billing", "forbidden", "bad_response", "internal",
+  ]);
+
+  function errText(code, message) {
+    if (i18n.lang() === "en" && ERR_CODES.has(code)) {
+      // too_large is the one translated code with a variable — the limit is
+      // config this frontend already holds.
+      return t("err." + code, { mb: state.maxUploadMb });
+    }
+    return message;
+  }
+
   // ── Toasts ───────────────────────────────────────────────────────────
 
   function toast(kind, message, ttl = 3600) {
@@ -231,17 +278,13 @@
   function applyToken() {
     state.mapboxToken = (state.serverConfig && state.serverConfig.mapboxToken) || "";
     if (dom.footMap) {
-      dom.footMap.textContent = state.mapboxToken
-        ? "地图由 Mapbox 渲染，浏览器会把推断出的坐标发给它。"
-        : "未配置 Mapbox 令牌，结果页使用内置示意地球，全程零外部请求。";
+      dom.footMap.textContent = state.mapboxToken ? t("foot.map.on") : t("foot.map.off");
     }
     return state.mapboxToken;
   }
 
   function describeToken() {
-    return applyToken()
-      ? "已配置，保存在服务端。清空并保存即可移除，结果页会退回内置示意地球。"
-      : "没有配置令牌，结果页使用内置示意地球，全程零外部请求。填一个公开令牌即可启用真实地图。";
+    return applyToken() ? t("settings.token.set") : t("settings.token.unset");
   }
 
   // ── Settings: the model credentials ──────────────────────────────────
@@ -327,7 +370,9 @@
       const stored = String(saved[key] || "");
       if (secret) {
         input.value = "";
-        input.placeholder = stored ? `已保存 ${stored} · 留空则不改动` : input.dataset.blank || "";
+        input.placeholder = stored
+          ? t("settings.secret.saved", { mask: stored })
+          : input.dataset.blank || "";
       } else {
         input.value = stored || selectDefault(key);
       }
@@ -349,12 +394,14 @@
   }
 
   // What each rung actually costs the user, in the terms they care about here.
+  // Keys into the i18n dictionaries, resolved at display time so the hint
+  // follows a language switch made while the sheet is open.
   const EFFORT_NOTE = {
-    low: "最快。单张照片的推断通常仍然可用，是最直接的提速手段。",
-    medium: "明显快于默认，质量损失很小 —— 想提速优先试这一档。",
-    high: "Anthropic 的默认值。思考最久的一档之下，也是最慢的常用档。",
-    xhigh: "比默认更细的推理，更慢更贵；这类单次视觉判断通常收益有限。",
-    max: "最慢。正确性压倒成本时才用，容易在简单图上过度思考。",
+    low: "settings.effortnote.low",
+    medium: "settings.effortnote.medium",
+    high: "settings.effortnote.high",
+    xhigh: "settings.effortnote.xhigh",
+    max: "settings.effortnote.max",
   };
 
   /** Dim the provider block that is not going to be used, and explain effort. */
@@ -369,8 +416,8 @@
     // The select always carries a concrete level now, so the hint only has to
     // explain what that level costs — plus a warning when the resolved provider
     // is the gateway, where effort has no equivalent and is simply ignored.
-    const note = EFFORT_NOTE[draft.anthropic_effort] || "";
-    const scope = provider === "openai" ? "当前走的是 OpenAI 兼容网关，这一项不生效。" : "";
+    const note = EFFORT_NOTE[draft.anthropic_effort] ? t(EFFORT_NOTE[draft.anthropic_effort]) : "";
+    const scope = provider === "openai" ? t("settings.effortnote.na") : "";
     setHint(dom.effortHint, [scope, note].filter(Boolean).join(" "), scope ? "warn" : "info");
   }
 
@@ -399,29 +446,27 @@
   function describeModel() {
     const server = state.serverConfig || {};
     if (!server.configured) {
-      return "还没有可用的模型密钥。在这里填一个，它会保存在服务端，重启也还在。";
+      return t("settings.model.none");
     }
     const saved = state.saved || {};
     const key = server.provider === "openai" ? saved.openai_api_key : saved.anthropic_api_key;
-    const where = key ? `密钥来自这里保存的配置（${key}）` : "密钥来自服务端环境变量";
-    return `将使用 ${server.provider} · ${server.model}，${where}。`;
+    const where = key ? t("settings.model.keysaved", { mask: key }) : t("settings.model.keyenv");
+    return t("settings.model.using", { provider: server.provider, model: server.model, where });
   }
 
   /** The top-bar chip names whatever will actually run. */
   function refreshChip() {
     const server = state.serverConfig || {};
-    dom.modelName.textContent = server.model || server.provider || "未配置";
+    dom.modelName.textContent = server.model || server.provider || t("chip.unset");
     dom.modelDot.dataset.state = server.configured ? "ok" : "off";
     dom.modelChip.title = server.configured
       ? `provider ${server.provider} · model ${server.model} · effort ${server.effort || "?"}`
-      : "还没有配置模型密钥：点右上角设置填一个";
+      : t("chip.nokey");
   }
 
   function describeHistory() {
     const n = state.historyCount || 0;
-    return n
-      ? `已保存 ${n} 张分析过的照片和它们的结论。清空后无法恢复。`
-      : "还没有保存任何历史。分析成功后会自动记录，最多保留 20 张。";
+    return n ? t("settings.history.some", { n }) : t("settings.history.none");
   }
 
   // ── Settings sheet: open / close / tabs ──────────────────────────────
@@ -461,11 +506,11 @@
     // A secret token in a browser is a real credential leak, not a style nit —
     // refuse it outright rather than storing it and warning afterwards.
     if (token.startsWith("sk.")) {
-      setHint(dom.tokenHint, "这是 sk. 开头的私密令牌，不能放进浏览器。请改用 pk. 开头的公开令牌。", "err");
+      setHint(dom.tokenHint, t("settings.token.sk"), "err");
       return false;
     }
     if (token && !token.startsWith("pk.")) {
-      setHint(dom.tokenHint, "Mapbox 公开令牌通常以 pk. 开头，请确认没有填错。", "warn");
+      setHint(dom.tokenHint, t("settings.token.pk"), "warn");
       return false;
     }
     return true;
@@ -500,21 +545,24 @@
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = (body && body.error && body.error.message) || `服务端返回 ${response.status}`;
+        const err = body && body.error;
+        const message = err
+          ? errText(err.code, err.message)
+          : t("err.http", { status: response.status });
         setHint(dom.modelHint, message, "err");
         selectTab("model");
         return;
       }
       state.saved = (body && body.config) || {};
     } catch {
-      setHint(dom.modelHint, "连不上后端，设置没有保存。", "err");
+      setHint(dom.modelHint, t("settings.save.offline"), "err");
       return;
     } finally {
       dom.settingsSave.disabled = false;
     }
 
     await loadConfig(); // the effective view changed; re-read it rather than guess
-    toast("ok", "设置已保存到服务端，重启也还在。");
+    toast("ok", t("settings.save.ok"));
     closeSettings();
     // Redraw in place so a map or provider change shows without re-analysing —
     // but never over a stream in flight. The payload in hand is the *previous*
@@ -527,7 +575,7 @@
     try {
       await fetch("/api/settings", { method: "DELETE" });
     } catch {
-      toast("err", "连不上后端，配置没有清除。");
+      toast("err", t("settings.revert.offline"));
       return;
     }
     await loadSaved();
@@ -537,13 +585,13 @@
     updateGroups();
     setHint(dom.modelHint, describeModel(), "info");
     setHint(dom.tokenHint, describeToken(), "info");
-    toast("ok", "已清除保存的配置，回到环境变量与默认值。");
+    toast("ok", t("settings.revert.ok"));
     if (state.shot && state.shot.payload && !state.busy) render(state.shot.payload);
   }
 
   /** Wipe the saved photos and results. Destructive, so it asks first. */
   async function clearHistory() {
-    if (!window.confirm("清空所有已保存的照片和分析结果？此操作无法撤销。")) return;
+    if (!window.confirm(t("settings.history.confirm"))) return;
     try {
       const response = await fetch("/api/history", { method: "DELETE" });
       const body = await response.json().catch(() => ({}));
@@ -551,9 +599,9 @@
       state.history = [];
       drawRail();
       setHint(dom.historyHint, describeHistory(), "info");
-      toast("ok", `已清空 ${body.removed || 0} 张历史。`);
+      toast("ok", t("settings.history.cleared", { n: body.removed || 0 }));
     } catch {
-      toast("err", "连不上后端，历史没有清空。");
+      toast("err", t("settings.history.offline"));
     }
   }
 
@@ -596,6 +644,22 @@
     return false;
   }
 
+  /* /api/verify verdicts carry {code, message, model} with a Chinese message.
+   * Same split as errText(): zh mode trusts the server's wording, EN mode
+   * rebuilds the line from the code — every verify code is enumerable, and the
+   * one variable worth keeping ({model}) rides along in the body. */
+  const VERIFY_CODES = new Set([
+    "ok", "not_configured", "auth", "rate_limited",
+    "timeout", "network", "upstream", "unconfirmed",
+  ]);
+
+  function verifyText(body) {
+    if (i18n.lang() === "en" && VERIFY_CODES.has(body.code)) {
+      return t("verify." + body.code, { model: body.model || "?" });
+    }
+    return body.message;
+  }
+
   /** Ask the backend to prove the credential works, without spending tokens. */
   async function testConnection() {
     const draft = readDraft();
@@ -608,32 +672,37 @@
 
     dom.settingsTest.disabled = true;
     const restore = dom.settingsTest.textContent;
-    dom.settingsTest.textContent = "测试中…";
-    setHint(dom.modelHint, "正在连接…", "info");
+    dom.settingsTest.textContent = t("settings.testing");
+    setHint(dom.modelHint, t("settings.connecting"), "info");
 
     try {
       const response = await fetch("/api/verify", { method: "POST", headers: draftHeaders(draft) });
       const body = await response.json().catch(() => null);
       if (!body) {
-        setHint(dom.modelHint, "后端没有返回可解析的结果。", "err");
+        setHint(dom.modelHint, t("settings.test.bad"), "err");
         return;
       }
       if (body.error) {
-        setHint(dom.modelHint, body.error.message || "配置有误。", "err");
+        setHint(
+          dom.modelHint,
+          (body.error.message && errText(body.error.code, body.error.message)) || t("settings.test.invalid"),
+          "err"
+        );
         return;
       }
       // The probe used the form as it stands, not what is stored — say so, or a
       // user who tests a new key and walks away will keep running the old one.
       const dirty = isDirty(draft);
-      const suffix = body.ok && dirty ? " 记得点「保存并生效」，否则分析仍用旧配置。" : "";
-      const message = body.message + (body.detail ? `（${body.detail}）` : "") + suffix;
+      const suffix = body.ok && dirty ? t("settings.test.unsaved") : "";
+      const message =
+        verifyText(body) + (body.detail ? t("settings.test.detail", { detail: body.detail }) : "") + suffix;
       setHint(
         dom.modelHint,
         message,
         body.ok ? (dirty ? "warn" : "info") : body.code === "unconfirmed" ? "warn" : "err"
       );
     } catch {
-      setHint(dom.modelHint, "连不上本地后端，请确认服务仍在运行。", "err");
+      setHint(dom.modelHint, t("settings.test.offline"), "err");
     } finally {
       dom.settingsTest.disabled = false;
       dom.settingsTest.textContent = restore;
@@ -658,7 +727,7 @@
       if (!input) return;
       const hidden = input.type === "password";
       input.type = hidden ? "text" : "password";
-      button.textContent = hidden ? "隐藏" : "显示";
+      button.textContent = hidden ? t("settings.hide") : t("settings.reveal");
     });
   }
 
@@ -701,13 +770,13 @@
       // a perfectly good answer and must not draw a warning.
       const view = models.describe(config);
       if (!view.configured) {
-        toast("warn", "还没有模型密钥。点右上角的设置填一个就能用。", 8000);
+        toast("warn", t("toast.nokey"), 8000);
       }
     } catch {
-      dom.modelName.textContent = "后端未连接";
+      dom.modelName.textContent = t("chip.offline");
       dom.modelDot.dataset.state = "off";
-      dom.modelChip.title = "取不到 /api/config，后端可能没有启动";
-      toast("err", "连不上后端 /api/config，请确认服务已启动。", 7000);
+      dom.modelChip.title = t("chip.offline.title");
+      toast("err", t("toast.offline"), 7000);
     }
   }
 
@@ -732,13 +801,13 @@
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      toast("err", "这不是图片文件，请选择 JPG、PNG 或 WebP。", 5000);
+      toast("err", t("toast.notimage"), 5000);
       return;
     }
     if (file.size > state.maxUploadMb * 1024 * 1024) {
       toast(
         "err",
-        `图片 ${humanBytes(file.size)}，超过 ${state.maxUploadMb} MB 上限，请先压缩。`,
+        t("toast.toolarge", { size: humanBytes(file.size), max: state.maxUploadMb }),
         6000
       );
       return;
@@ -761,7 +830,7 @@
 
     dom.reset.hidden = false;
     dom.run.disabled = false;
-    dom.runLabel.textContent = "开始定位";
+    dom.runLabel.textContent = t("run.start");
     dom.fix.style.opacity = "0";
     dom.exifNote.hidden = true;
     markRailActive(null);
@@ -829,7 +898,7 @@
     dom.cornerRead.hidden = true;
     dom.reset.hidden = true;
     dom.run.disabled = true;
-    dom.runLabel.textContent = "开始定位";
+    dom.runLabel.textContent = t("run.start");
     dom.fix.style.opacity = "0";
     dom.plateDims.textContent = "—";
     dom.exifNote.hidden = true;
@@ -858,14 +927,14 @@
     clear(dom.readout);
     dom.readout.setAttribute("aria-busy", "false");
 
-    const box = panel("出错了 / ERROR");
+    const box = panel(t("panel.error"));
     const alarm = el("div", "alarm");
     alarm.append(el("b", null, title), el("span", null, message));
     if (code) alarm.append(el("code", null, code));
     box.append(alarm);
 
     const acts = el("div", "acts");
-    const retry = el("button", "mini", "重试");
+    const retry = el("button", "mini", t("act.retry"));
     retry.type = "button";
     retry.addEventListener("click", run);
     acts.append(retry);
@@ -875,13 +944,15 @@
     anim(box, { opacity: [0, 1], y: [10, 0] }, { duration: 0.3, ease: EASE_OUT });
   }
 
+  // Dictionary keys, resolved when each line is painted: the rotation keeps
+  // running across a language switch, and the next line lands translated.
   const PHASES = [
-    "读取地形、海岸线与植被，先把范围收进气候带……",
-    "搜索画面里的一切文字：招牌、路牌、车身、涂鸦……",
-    "比对道路规则：靠左还是靠右、车道线、护栏与防撞柱……",
-    "核对基础设施：电线杆横担、路灯灯头、井盖、消防栓……",
-    "用阴影方向反推半球与纬度，收敛到城市一级……",
-    "整理证据链，排出备选地点……",
+    "phase.terrain",
+    "phase.text",
+    "phase.road",
+    "phase.infra",
+    "phase.shadow",
+    "phase.chain",
   ];
 
   // One 100ms tick for the whole request. The working panel starts it and the
@@ -912,11 +983,11 @@
     const working = el("div", "working");
 
     const head = el("div", "working__head");
-    head.append(el("span", "label", "分析中 / READING"));
+    head.append(el("span", "label", t("panel.reading")));
     const timer = el("span", "working__timer", "0.0s");
     head.append(timer);
 
-    const text = el("p", "working__text", PHASES[0]);
+    const text = el("p", "working__text", t(PHASES[0]));
 
     const bones = el("div", "bones");
     bones.append(el("div", "bone bone--lg"));
@@ -947,7 +1018,7 @@
         // has removed this panel. Writing the next phase into a node the
         // document no longer holds is a leak with nothing to show for it.
         if (!text.isConnected) return;
-        text.textContent = PHASES[phase];
+        text.textContent = t(PHASES[phase]);
         anim(text, { opacity: [0, 1], y: [6, 0] }, { duration: 0.22, ease: EASE_OUT });
       };
       if (out && typeof out.finished?.then === "function") {
@@ -973,7 +1044,12 @@
 
   // ── Readout: the verdict ─────────────────────────────────────────────
 
-  const BAND_TEXT = { high: "高置信", medium: "中置信", low: "低置信" };
+  const BAND_TEXT = { high: "band.high", medium: "band.medium", low: "band.low" };
+
+  /** The band's display text; the untranslated fallback matches the old code. */
+  function bandText(band) {
+    return BAND_TEXT[band] ? t(BAND_TEXT[band]) : "confidence";
+  }
   const GAUGE_R = 59;
   const GAUGE_LEN = Math.PI * GAUGE_R;
   const GAUGE_ARC = `M 7 68 A ${GAUGE_R} ${GAUGE_R} 0 0 1 125 68`;
@@ -997,7 +1073,7 @@
     const digits = document.createTextNode("");
     num.append(digits, el("sub", null, "/100"));
 
-    wrap.append(chart, num, el("div", "gauge__label", BAND_TEXT[band] || "confidence"));
+    wrap.append(chart, num, el("div", "gauge__label", bandText(band)));
 
     const target = GAUGE_LEN * (1 - Math.max(0, Math.min(100, confidence)) / 100);
     if (!entering) {
@@ -1031,12 +1107,12 @@
 
   function buildCoords(coordinates) {
     const box = el("div", "coords");
-    box.append(el("span", "label label--dim", "坐标 / FIX"));
+    box.append(el("span", "label label--dim", t("coords.label")));
 
     const lat = coordinates.lat.toFixed(4);
     const lon = coordinates.lon.toFixed(4);
     box.append(el("div", "coords__value", `${lat}, ${lon}`));
-    box.append(el("div", "coords__radius", `± ${Math.round(coordinates.radius_km)} KM 可信半径`));
+    box.append(el("div", "coords__radius", t("coords.radius", { km: Math.round(coordinates.radius_km) })));
 
     const links = el("div", "coords__links");
 
@@ -1049,9 +1125,9 @@
       link.rel = "noopener noreferrer";
     }
 
-    const copy = el("button", "mini", "复制坐标");
+    const copy = el("button", "mini", t("coords.copy"));
     copy.type = "button";
-    copy.addEventListener("click", () => copyText(`${lat}, ${lon}`, "坐标已复制"));
+    copy.addEventListener("click", () => copyText(`${lat}, ${lon}`, t("coords.copied")));
 
     links.append(gmaps, osm, copy);
     box.append(links);
@@ -1073,7 +1149,7 @@
     if (!node) return null;
 
     const wrap = el("div", "globe-wrap");
-    wrap.append(node, el("span", "globe__cap", "正射投影 · 视心即判定点"));
+    wrap.append(node, el("span", "globe__cap", t("globe.cap")));
     anim(node, { opacity: [0, 1], rotate: [-14, 0], scale: [0.9, 1] }, { duration: 0.8, ease: EASE_OUT });
     return wrap;
   }
@@ -1222,11 +1298,12 @@
   }
 
   // How the verdict is headlined depends on how far the model actually got.
+  // Dictionary keys, not display text: resolved by t() wherever they surface.
   const PRECISION = {
-    country: { label: "国家", note: "证据只支撑到国家一级，未给出更细的判断。" },
-    region: { label: "一级行政区", note: "证据只支撑到一级行政区，未给出城市判断。" },
-    city: { label: "城市", note: "" },
-    locality: { label: "街区 / 地标", note: "" },
+    country: { label: "prec.country", note: "prec.country.note" },
+    region: { label: "prec.region", note: "prec.region.note" },
+    city: { label: "prec.city", note: "" },
+    locality: { label: "prec.locality", note: "" },
   };
 
   // What the model writes when it could not tell — the marker, not UI copy.
@@ -1243,9 +1320,9 @@
 
   // Only the levels above the headline are worth repeating underneath it.
   const ADMIN_ABOVE = {
-    locality: [["国家", "country"], ["行政区", "region"], ["城市", "city"]],
-    city: [["国家", "country"], ["行政区", "region"]],
-    region: [["国家", "country"]],
+    locality: [["admin.country", "country"], ["admin.region", "region"], ["admin.city", "city"]],
+    city: [["admin.country", "country"], ["admin.region", "region"]],
+    region: [["admin.country", "country"]],
     country: [],
   };
 
@@ -1256,11 +1333,11 @@
    * whether an empty chain is hidden or never appended. */
   function buildAdmin(precision, places) {
     const admin = el("div", "verdict__admin");
-    for (const [labelText, key] of ADMIN_ABOVE[precision] || ADMIN_ABOVE.country) {
+    for (const [labelKey, key] of ADMIN_ABOVE[precision] || ADMIN_ABOVE.country) {
       const place = places[key];
       if (!placeKnown(place)) continue;
       const span = el("span");
-      span.append(el("em", null, labelText), document.createTextNode(` ${place.name_zh}`));
+      span.append(el("em", null, t(labelKey)), document.createTextNode(` ${placeName(place)}`));
       admin.append(span);
     }
     return admin;
@@ -1286,7 +1363,7 @@
    * map that blinks are the two loudest tells that the final render threw the
    * draft away. Empty on a restored history entry, which has no draft. */
   function buildVerdict(result, shown = {}) {
-    const box = panel("判定 / VERDICT");
+    const box = panel(t("panel.verdict"));
     const precision = PRECISION[result.precision] || PRECISION.country;
     const headline = headlineOf(result);
 
@@ -1294,16 +1371,20 @@
 
     const grade = el("div", "grade");
     grade.dataset.precision = result.precision;
-    grade.append(el("span", "grade__dot"), el("span", null, `精确到 ${precision.label}`));
+    grade.append(el("span", "grade__dot"), el("span", null, t("verdict.precision", { level: t(precision.label) })));
     verdict.append(grade);
 
-    verdict.append(el("h2", "verdict__city", headline.zh || "未确定"));
-    if (headline.en) verdict.append(el("div", "verdict__latin", headline.en));
+    // zh leads and the Latin name sits underneath; EN mode flips that, with
+    // the Chinese demoted to the secondary line so no information is lost.
+    const lead = placeName(headline) || t("verdict.unknown");
+    const sub = i18n.lang() === "en" ? (headline.zh !== lead ? headline.zh : "") : headline.en;
+    verdict.append(el("h2", "verdict__city", lead));
+    if (sub) verdict.append(el("div", "verdict__latin", sub));
 
     const admin = buildAdmin(result.precision, result);
     if (admin.childElementCount) verdict.append(admin);
 
-    if (precision.note) verdict.append(el("div", "verdict__locality", precision.note));
+    if (precision.note) verdict.append(el("div", "verdict__locality", t(precision.note)));
     if (result.summary) verdict.append(el("p", "verdict__summary", result.summary));
     box.append(verdict);
 
@@ -1314,7 +1395,7 @@
     );
     box.append(row);
 
-    const view = adoptLocationView(shown, result.coordinates, headline.zh);
+    const view = adoptLocationView(shown, result.coordinates, placeName(headline));
     if (view) box.append(view);
 
     return box;
@@ -1324,10 +1405,31 @@
    * before the final result exists. Both paths call this, so the provisional
    * chain and the final one cannot drift into different markup — which is what
    * makes the swap at the end invisible. */
+  /* The category is prompt.py's fixed Chinese enum — the request's `lang`
+   * field changes the prose fields, never this one — so EN display maps the
+   * known values here and shows anything unrecognised as the model wrote it.
+   * The zh dictionary carries the enum strings verbatim, so zh is untouched. */
+  const CATEGORY_KEYS = {
+    "地形地貌": "cat.terrain",
+    "植被": "cat.vegetation",
+    "建筑风格": "cat.architecture",
+    "道路与交通": "cat.road",
+    "文字与标识": "cat.text",
+    "车辆与车牌": "cat.vehicle",
+    "气候与光照": "cat.climate",
+    "基础设施": "cat.infra",
+    "人文与服饰": "cat.culture",
+    "其他": "cat.other",
+  };
+
+  function categoryText(raw) {
+    return CATEGORY_KEYS[raw] ? t(CATEGORY_KEYS[raw]) : raw;
+  }
+
   function evidenceRow(item) {
     const row = el("div", "ev");
     row.dataset.weight = item.weight;
-    row.append(el("div", "ev__cat", item.category));
+    row.append(el("div", "ev__cat", categoryText(item.category)));
     const body = el("div", "ev__body");
     body.append(el("div", "ev__obs", item.observation));
     if (item.implication) body.append(el("div", "ev__imp", item.implication));
@@ -1339,7 +1441,7 @@
    * on screen and under the user's eye, and fading them in again is exactly the
    * flash the progressive panel exists to avoid. */
   function buildEvidence(evidence, entering = true) {
-    const box = panel("证据链 / EVIDENCE");
+    const box = panel(t("panel.evidence"));
     const list = el("div", "evidence");
     const rows = evidence.map((item) => evidenceRow(item));
     for (const row of rows) list.append(row);
@@ -1359,7 +1461,7 @@
     const row = el("div", "alt");
 
     const left = el("div");
-    left.append(el("div", "alt__name", item.city || item.region || item.country || "未命名"));
+    left.append(el("div", "alt__name", item.city || item.region || item.country || t("alt.unnamed")));
     const where = [item.region, item.country].filter(Boolean).join(" · ");
     if (where) left.append(el("div", "alt__where", where));
     if (item.reason) left.append(el("div", "alt__why", item.reason));
@@ -1388,7 +1490,7 @@
   }
 
   function buildAlternatives(alternatives, notes, entering = true) {
-    const box = panel("备选 / ALTERNATIVES");
+    const box = panel(t("panel.alts"));
     const list = el("div", "alts");
     for (const item of alternatives) list.append(alternativeRow(item, entering));
 
@@ -1400,35 +1502,44 @@
   function summaryText(result, meta) {
     const chain = [result.country, result.region, result.city]
       .filter((place) => place.known)
-      .map((place) => place.name_zh);
+      .map((place) => placeName(place));
     if (result.locality) chain.push(result.locality);
 
     const precision = PRECISION[result.precision] || PRECISION.country;
     const lines = [
-      `判定：${chain.join(" / ")}`,
-      `精度：只能确定到${precision.label}一级`,
+      t("export.verdict", { chain: chain.join(" / ") }),
+      t("export.precision", { level: t(precision.label) }),
     ];
     if (result.coordinates) {
       lines.push(
-        `坐标：${result.coordinates.lat.toFixed(4)}, ${result.coordinates.lon.toFixed(4)}` +
-          `（± ${Math.round(result.coordinates.radius_km)} km）`
+        t("export.coords", {
+          lat: result.coordinates.lat.toFixed(4),
+          lon: result.coordinates.lon.toFixed(4),
+          km: Math.round(result.coordinates.radius_km),
+        })
       );
     }
-    lines.push(`置信度：${result.confidence}/100（${BAND_TEXT[result.confidence_band]}）`);
+    lines.push(t("export.confidence", { n: result.confidence, band: bandText(result.confidence_band) }));
     if (result.summary) lines.push("", result.summary);
     if (result.evidence.length) {
-      lines.push("", "证据链：");
+      lines.push("", t("export.evidence"));
       result.evidence.forEach((item, index) => {
-        lines.push(`${index + 1}. [${item.category}] ${item.observation} → ${item.implication}`);
+        lines.push(`${index + 1}. [${categoryText(item.category)}] ${item.observation} → ${item.implication}`);
       });
     }
     if (result.alternatives.length) {
-      lines.push("", "备选：");
+      lines.push("", t("export.alts"));
       for (const alt of result.alternatives) {
-        lines.push(`- ${[alt.city, alt.region, alt.country].filter(Boolean).join(", ")}（${alt.likelihood}%）${alt.reason}`);
+        lines.push(
+          t("export.alt", {
+            name: [alt.city, alt.region, alt.country].filter(Boolean).join(", "),
+            pct: alt.likelihood,
+            reason: alt.reason,
+          })
+        );
       }
     }
-    if (result.notes) lines.push("", `补充：${result.notes}`);
+    if (result.notes) lines.push("", t("export.notes", { notes: result.notes }));
     lines.push("", `— ${meta.provider} / ${meta.model} · ${(meta.elapsedMs / 1000).toFixed(1)}s`);
     return lines.join("\n");
   }
@@ -1438,20 +1549,20 @@
       await navigator.clipboard.writeText(text);
       toast("ok", okMessage);
     } catch {
-      toast("err", "浏览器拒绝了剪贴板访问，请手动复制。");
+      toast("err", t("toast.clipboard"));
     }
   }
 
   function buildActions(payload) {
     const acts = el("div", "acts");
 
-    const copySummary = el("button", "mini", "复制结论");
+    const copySummary = el("button", "mini", t("act.copy"));
     copySummary.type = "button";
     copySummary.addEventListener("click", () =>
-      copyText(summaryText(payload.result, payload.meta), "结论已复制到剪贴板")
+      copyText(summaryText(payload.result, payload.meta), t("act.copied"))
     );
 
-    const downloadJson = el("button", "mini", "下载 JSON");
+    const downloadJson = el("button", "mini", t("act.download"));
     downloadJson.type = "button";
     downloadJson.addEventListener("click", () => {
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1462,10 +1573,10 @@
       link.download = `location-${slug}.json`.replace(/\s+/g, "-");
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      toast("ok", "已导出 JSON");
+      toast("ok", t("act.downloaded"));
     });
 
-    const again = el("button", "mini", "重新分析");
+    const again = el("button", "mini", t("act.again"));
     again.type = "button";
     again.addEventListener("click", run);
 
@@ -1478,8 +1589,8 @@
     for (const bit of [
       `${(meta.elapsedMs / 1000).toFixed(1)}s`,
       `${meta.provider} · ${meta.model}`,
-      `送模型 ${meta.analyzedSize[0]}×${meta.analyzedSize[1]}`,
-      `原图 ${meta.sourceSize[0]}×${meta.sourceSize[1]}`,
+      t("meta.sent", { w: meta.analyzedSize[0], h: meta.analyzedSize[1] }),
+      t("meta.source", { w: meta.sourceSize[0], h: meta.sourceSize[1] }),
     ]) {
       row.append(el("span", null, bit));
     }
@@ -1510,23 +1621,23 @@
    * An array field is only ever reported element by element; its whole value
    * never arrives as a partial, because the elements already carried it. */
 
-  const DRAFT_WAIT = "正在读取画面…";
+  const DRAFT_WAIT = "draft.wait";
 
   /* The array fields, and how one element of each becomes a row. The builders
    * are the ones the final render uses — that is the whole reason they were
-   * split out. */
+   * split out. `label` and `said` are dictionary keys, resolved when spoken. */
   const DRAFT_ARRAYS = {
     evidence: {
-      label: "证据链 / EVIDENCE",
+      label: "panel.evidence",
       list: "evidence",
       row: evidenceRow,
-      said: "模型开始写证据链",
+      said: "draft.said.evidence",
     },
     alternatives: {
-      label: "备选 / ALTERNATIVES",
+      label: "panel.alts",
       list: "alts",
       row: alternativeRow,
-      said: "模型开始列备选地点",
+      said: "draft.said.alts",
     },
   };
 
@@ -1618,12 +1729,12 @@
    * pause under a motionless card reads as a hang, which is the complaint. */
   function draftPhase() {
     const alternatives = draft.lists.alternatives;
-    if (alternatives) return `模型还在列备选… 已列出 ${alternatives.list.childElementCount} 个`;
+    if (alternatives) return t("draft.phase.alts", { n: alternatives.list.childElementCount });
     const evidence = draft.lists.evidence;
-    if (evidence) return `模型还在写证据链… 已写出 ${evidence.list.childElementCount} 条`;
-    if (draft.fields.summary) return "模型还在写证据链…";
-    if (typeof draft.fields.confidence === "number") return "模型还在写概述…";
-    return "模型还在写，以下是初步判断";
+    if (evidence) return t("draft.phase.evidence", { n: evidence.list.childElementCount });
+    if (draft.fields.summary) return t("draft.phase.evidence0");
+    if (typeof draft.fields.confidence === "number") return t("draft.phase.summary");
+    return t("draft.phase.early");
   }
 
   function paintFoot() {
@@ -1639,7 +1750,7 @@
     clear(dom.readout);
     dom.readout.setAttribute("aria-busy", "true");
 
-    draft.panel = panel("正在收敛 / NARROWING");
+    draft.panel = panel(t("panel.narrowing"));
     draft.panel.dataset.draft = "true";
 
     draft.note = el("span");
@@ -1653,7 +1764,7 @@
      * and re-animating settled text reads as a redraw, not as refinement. An
      * empty slot is [hidden], so it neither shows nor takes a flex gap. */
     const verdict = el("div", "verdict");
-    draft.wait = el("div", "verdict__locality", DRAFT_WAIT);
+    draft.wait = el("div", "verdict__locality", t(DRAFT_WAIT));
     draft.title = el("h2", "verdict__city");
     draft.latin = el("div", "verdict__latin");
     draft.admin = el("div", "verdict__admin");
@@ -1688,13 +1799,13 @@
     if (draft.gauge) {
       draft.gauge.dataset.band = band;
       const label = draft.gauge.querySelector(".gauge__label");
-      if (label) label.textContent = BAND_TEXT[band] || "confidence";
+      if (label) label.textContent = bandText(band);
       return;
     }
 
     draft.gauge = buildGauge(value, band);
     draft.gaugeValue = value; // the final render checks this before re-animating
-    announce(`置信度 ${value}/100`);
+    announce(t("aria.confidence", { n: value }));
     // The same grid the final render uses, with the left cell left empty: the
     // coordinates are still unreconciled (normalize has not applied the radius
     // floor), and a "复制坐标" button on a number that is about to change is a
@@ -1714,6 +1825,16 @@
    * "should this move" is the text itself, not which frame we are on. */
   function syncVerdict() {
     const headline = draftHeadline();
+    // Same display rule as buildVerdict(): EN leads with the Latin name and
+    // demotes the Chinese to the secondary line; zh is untouched.
+    const lead = headline ? placeName(headline) : "";
+    const sub = headline
+      ? i18n.lang() === "en"
+        ? headline.zh !== lead
+          ? headline.zh
+          : ""
+        : headline.en
+      : "";
 
     // Nothing nameable yet leaves the placeholder up — but the summary below
     // still lands, because a model that never names a place still explains why.
@@ -1725,7 +1846,7 @@
     // retracted name simply vanished. Without this branch a street the app has
     // already decided not to stand behind stays on screen until the final frame.
     if (!headline) {
-      if (!draft.title.hidden) announce("正在收敛，尚未确定地点");
+      if (!draft.title.hidden) announce(t("aria.unsettled"));
       draft.title.textContent = "";
       draft.title.hidden = true;
       draft.latin.textContent = "";
@@ -1738,15 +1859,15 @@
       // may have hidden this slot while the text stayed the same, and a
       // headline that comes back must come back visible.
       draft.title.hidden = false;
-      if (draft.title.textContent !== headline.zh) {
-        draft.title.textContent = headline.zh;
+      if (draft.title.textContent !== lead) {
+        draft.title.textContent = lead;
         // The one motion worth keeping: the answer just got more precise.
         anim(draft.title, { opacity: [0, 1], y: [6, 0] }, { duration: 0.3, ease: EASE_OUT });
-        announce(`初步判断 ${headline.zh}`);
+        announce(t("aria.provisional", { name: lead }));
       }
 
-      if (draft.latin.textContent !== headline.en) draft.latin.textContent = headline.en;
-      draft.latin.hidden = !headline.en;
+      if (draft.latin.textContent !== sub) draft.latin.textContent = sub;
+      draft.latin.hidden = !sub;
 
       // Built by the same rule and out of the same markup as the final render's,
       // including the <em> labels — the row used to lose its city and gain those
@@ -1782,7 +1903,7 @@
 
     const headline = draftHeadline();
     draft.mapAt = { lat: coords.lat, lon: coords.lon, radius_km: Number(coords.radius_km) || 25 };
-    draft.map = buildLocationView(draft.mapAt, headline ? headline.zh : "");
+    draft.map = buildLocationView(draft.mapAt, headline ? placeName(headline) : "");
     if (draft.map) draft.panel.insertBefore(draft.map, draft.foot);
     else draft.mapAt = null; // nothing was built, so there is nothing to adopt
   }
@@ -1822,7 +1943,7 @@
     const existing = draft.lists[field];
     if (existing) return existing;
 
-    const box = panel(spec.label);
+    const box = panel(t(spec.label));
     // Dashed like the lead card, but "more" rather than "true": only the lead
     // card breathes. Three borders pulsing out of phase reads as noise.
     box.dataset.draft = "more";
@@ -1835,7 +1956,7 @@
     draft.lists[field] = slot;
     // Once per list, not once per row: six "已写出 N 条" in nine seconds is the
     // spam that makes people turn a live region off.
-    announce(spec.said);
+    announce(t(spec.said));
     return slot;
   }
 
@@ -1899,7 +2020,7 @@
       const box = buildAlternatives(result.alternatives, result.notes, !shown.alternatives);
       blocks.push([box, !shown.alternatives]);
     } else if (result.notes) {
-      const box = panel("补充说明 / NOTES");
+      const box = panel(t("panel.notes"));
       box.append(el("p", "panel__foot", result.notes));
       blocks.push([box, true]);
     }
@@ -1919,9 +2040,10 @@
     anim(dom.fix, { opacity: [0, 1], scale: [1.8, 1] }, { duration: 0.55, delay: 0.1, ease: EASE_OUT });
 
     if (meta.exifGps) {
-      dom.exifNote.textContent =
-        `注意：这张照片的 EXIF 自带 GPS ${meta.exifGps.lat.toFixed(4)}, ${meta.exifGps.lon.toFixed(4)}。` +
-        "该坐标在上传后已被剥离，没有送进模型 —— 上面的判断完全来自画面本身。";
+      dom.exifNote.textContent = t("exif.note", {
+        lat: meta.exifGps.lat.toFixed(4),
+        lon: meta.exifGps.lon.toFixed(4),
+      });
       dom.exifNote.hidden = false;
       anim(dom.exifNote, { opacity: [0, 1] }, { duration: 0.4, delay: 0.3 });
     } else {
@@ -1972,7 +2094,7 @@
     dom.cornerRead.hidden = false;
     dom.reset.hidden = false;
     dom.run.disabled = true;
-    dom.runLabel.textContent = "回看中";
+    dom.runLabel.textContent = t("run.review");
     render(shot.payload);
     markRailActive(shot.id);
   }
@@ -1987,9 +2109,9 @@
       item.setAttribute("role", "listitem");
 
       const result = shot.payload.result;
-      const where = headlineOf(result).zh || "未确定";
+      const where = placeName(headlineOf(result)) || t("verdict.unknown");
       item.title = `${where} · ${result.confidence}/100`;
-      item.setAttribute("aria-label", `回看：${where}，置信度 ${result.confidence}`);
+      item.setAttribute("aria-label", t("rail.aria", { where, n: result.confidence }));
 
       const thumb = el("img", "rail__thumb");
       thumb.src = shotImageUrl(shot.id);
@@ -2022,7 +2144,11 @@
     dom.settingsOpen.disabled = on;
     dom.cancel.hidden = !on;
     dom.frame.classList.toggle("is-working", on);
-    dom.runLabel.textContent = on ? "分析中…" : state.shot && state.shot.payload ? "重新定位" : "开始定位";
+    dom.runLabel.textContent = on
+      ? t("run.busy")
+      : state.shot && state.shot.payload
+        ? t("run.again")
+        : t("run.start");
     for (const item of dom.rail.children) item.disabled = on;
   }
 
@@ -2082,9 +2208,13 @@
 
     const body = new FormData();
     body.append("image", shot.file, shot.file.name || "upload.jpg");
+    // The backend threads this into the prompt so the model writes its prose
+    // (summary, observations, reasons, notes) in the page's current language.
+    // name_zh / name_en keep their fixed semantics either way.
+    body.append("lang", i18n.lang());
 
     const fail = (code, message) => {
-      showError(code, "定位失败", message);
+      showError(code, t("err.title"), message);
       toast("err", message, 6000);
     };
 
@@ -2099,7 +2229,7 @@
       });
 
       if (!response.ok || !response.body) {
-        fail(`http_${response.status}`, `服务端返回 ${response.status}，请查看后端日志。`);
+        fail(`http_${response.status}`, t("err.http.body", { status: response.status }));
         return;
       }
 
@@ -2112,7 +2242,8 @@
           if (typeof data.index === "number") applyPartialItem(data.field, data.index, data.value);
           else applyPartial(data.field, data.value);
         } else if (name === "error") {
-          fail(data.code || "internal", data.message || "服务端出错了。");
+          // A server body: Chinese message, translated by code where possible.
+          fail(data.code || "internal", errText(data.code || "internal", data.message || t("err.internal")));
           return;
         } else if (name === "result") {
           payload = data;
@@ -2120,7 +2251,7 @@
       }
 
       if (!payload) {
-        fail("bad_response", "连接中断，没有收到完整结果。");
+        fail("bad_response", t("err.stream"));
         return;
       }
 
@@ -2132,17 +2263,20 @@
       loadHistory();
       toast(
         "ok",
-        `${headlineOf(payload.result).zh || "未确定"} · 置信度 ${payload.result.confidence}/100`,
+        t("toast.done", {
+          where: placeName(headlineOf(payload.result)) || t("verdict.unknown"),
+          n: payload.result.confidence,
+        }),
         4200
       );
     } catch (error) {
       if (error && error.name === "AbortError") {
         showIdle();
-        toast("warn", "已取消这次分析。");
+        toast("warn", t("toast.cancelled"));
         return;
       }
-      showError("network", "连不上后端", "请确认服务仍在运行，然后重试。");
-      toast("err", "网络请求失败。", 5000);
+      showError("network", t("err.network.title"), t("err.network.body"));
+      toast("err", t("toast.netfail"), 5000);
     } finally {
       stopWorking();
       resetDraft();
@@ -2193,6 +2327,49 @@
     }
   });
 
+  // ── Language switches ────────────────────────────────────────────────
+
+  /* i18n.apply() has already re-annotated the static chrome by the time this
+   * runs (set() notifies listeners last); what is left is every line whose
+   * text depends on runtime state. A finished result re-renders in the new
+   * language — the model-written prose inside it keeps the language it was
+   * generated in until the next run, which also sends the new `lang` field.
+   * An in-flight draft card is deliberately left alone: repainting a live
+   * stream would mix two languages mid-card, so it keeps its language until
+   * the next run. An error panel likewise stays: there is no payload to
+   * rebuild it from. */
+  i18n.onChange(() => {
+    refreshChip();
+    applyToken();
+    if (dom.settings.open) {
+      fillForm(state.saved);
+      updateGroups();
+      setHint(dom.modelHint, describeModel(), "info");
+      setHint(dom.tokenHint, describeToken(), "info");
+      if (dom.historyHint) setHint(dom.historyHint, describeHistory(), "info");
+      // apply() reset every reveal button to "Show"; restate the ones whose
+      // input is actually revealed right now.
+      for (const button of document.querySelectorAll("[data-reveal]")) {
+        const input = $(button.dataset.reveal);
+        if (input && input.type === "text") button.textContent = t("settings.hide");
+      }
+    }
+    if (state.busy) return;
+    dom.runLabel.textContent = state.shot
+      ? state.shot.file
+        ? state.shot.payload
+          ? t("run.again")
+          : t("run.start")
+        : t("run.review")
+      : t("run.start");
+    drawRail();
+    // …unless an error panel is on screen: repainting the stale payload would
+    // silently replace the failure the user is reading about.
+    if (state.shot && state.shot.payload && !dom.readout.querySelector(".alarm")) {
+      render(state.shot.payload);
+    }
+  });
+
   // ── Entrance ─────────────────────────────────────────────────────────
 
   function entrance() {
@@ -2216,6 +2393,9 @@
   });
 
   entrance();
+  // The HTML ships its button label in Chinese; i18n.apply() cannot reach it
+  // because the label is runtime state everywhere else (分析中…/重新定位).
+  if (i18n.lang() !== "zh") dom.runLabel.textContent = t("run.start");
   applyToken(); // reflect any stored override before the config round-trip lands
   loadConfig();
   // The rail is server-backed, so it repopulates on every load — including

@@ -26,10 +26,108 @@
 
    Pure state and logic: no DOM, no fetch, no storage, no imports.
    app.js owns every pixel; this module only answers whether a draft is
-   sane and what the server says is configured.
+   sane and what the server says is configured. Its sentences resolve
+   through i18n.js AT CALL TIME (falling back to the local table below
+   when that is missing), so an answer arrives in whatever language the
+   page speaks when it is asked — re-rendering after a live language
+   switch stays the caller's job, same as every other pixel.
    ═══════════════════════════════════════════════════════════════════ */
 (() => {
   "use strict";
+
+  // ── i18n ─────────────────────────────────────────────────────────────
+
+  /* Every sentence this module can produce, in both languages, keyed under
+   * "settings.". Handed to i18n.js at load time: extend() when the loaded
+   * copy provides it, else the documented window.RIL.i18nExtra side-channel
+   * that i18n.js merges. The local copy is kept because the worst failure of
+   * a missing or mismatched i18n.js must be today's Chinese sentences, never
+   * a raw key surfacing in a validation toast. */
+  const STRINGS = {
+    zh: {
+      "settings.label.provider": "模型来源",
+      "settings.label.anthropic_api_key": "Anthropic API Key",
+      "settings.label.anthropic_model": "Anthropic 模型名",
+      "settings.label.anthropic_effort": "思考深度",
+      "settings.label.openai_base_url": "Base URL",
+      "settings.label.openai_api_key": "OpenAI API Key",
+      "settings.label.openai_model": "OpenAI 模型名",
+      "settings.list_join": "、",
+      "settings.err.too_long": "{label}超过 {max} 个字符，多半是粘贴错了内容。",
+      "settings.err.whitespace": "{label}中间不能有空格或换行，请检查是不是粘贴多了。",
+      "settings.err.unsendable":
+        "{label}含有中文或不可打印字符，保存下来也用不了（“测试连接”更是发不出去）。",
+      "settings.err.provider": "模型来源只能填 auto、claude 或 openai。",
+      "settings.err.effort": "思考深度只能填 {levels}。",
+      "settings.warn.key_prefix": "Anthropic 密钥通常以 sk-ant- 开头，请确认没有填错。",
+      "settings.err.base_needs_key":
+        "填了网关地址就必须同时填该网关的 API Key，否则请求会被后端拒绝。",
+      "settings.err.base_scheme": "Base URL 必须以 http:// 或 https:// 开头。",
+      "settings.err.base_path": "Base URL 只填到 /v1 为止，不要带 /chat/completions。",
+      "settings.gateway_name": "OpenAI 兼容网关",
+      "settings.note.server_creds": "当前使用服务端保存的 {name} 凭据，在设置里可以随时换一份。",
+      "settings.note.missing_key": "服务端还没有 {name} 的 API Key，定位会返回 not_configured。",
+      "settings.note.missing_piece":
+        "服务端的 {name} 配置还差 {missing}，定位会返回 not_configured。",
+    },
+    en: {
+      "settings.label.provider": "Model provider",
+      "settings.label.anthropic_api_key": "Anthropic API Key",
+      "settings.label.anthropic_model": "Anthropic model name",
+      "settings.label.anthropic_effort": "Thinking effort",
+      "settings.label.openai_base_url": "Base URL",
+      "settings.label.openai_api_key": "OpenAI API Key",
+      "settings.label.openai_model": "OpenAI model name",
+      "settings.list_join": ", ",
+      "settings.err.too_long":
+        "{label} is over {max} characters — most likely the paste grabbed the wrong thing.",
+      "settings.err.whitespace":
+        "{label} cannot contain spaces or line breaks — check whether the paste picked up extra.",
+      "settings.err.unsendable":
+        "{label} contains Chinese or non-printable characters — it will not work even if saved (and \"Test connection\" cannot send it at all).",
+      "settings.err.provider": "Model provider must be auto, claude or openai.",
+      "settings.err.effort": "Thinking effort must be one of {levels}.",
+      "settings.warn.key_prefix": "Anthropic keys usually start with sk-ant- — double-check this one.",
+      "settings.err.base_needs_key":
+        "A gateway Base URL must come with that gateway's own API Key, or the backend will refuse the request.",
+      "settings.err.base_scheme": "Base URL must start with http:// or https://.",
+      "settings.err.base_path": "Fill in the Base URL only up to /v1 — leave off /chat/completions.",
+      "settings.gateway_name": "OpenAI-compatible gateway",
+      "settings.note.server_creds":
+        "Using the {name} credentials saved on the server — swap them in Settings at any time.",
+      "settings.note.missing_key":
+        "The server has no API Key for {name} yet, so locating will return not_configured.",
+      "settings.note.missing_piece":
+        "The server's {name} setup is still missing its {missing}, so locating will return not_configured.",
+    },
+  };
+
+  window.RIL = window.RIL || {};
+  if (window.RIL.i18n && typeof window.RIL.i18n.extend === "function") {
+    window.RIL.i18n.extend(STRINGS);
+  } else {
+    const extra = (window.RIL.i18nExtra = window.RIL.i18nExtra || {});
+    extra.zh = Object.assign(extra.zh || {}, STRINGS.zh);
+    extra.en = Object.assign(extra.en || {}, STRINGS.en);
+  }
+
+  /* Prefer i18n.js — it knows the page's current language — and fall back to
+   * the table above when it is absent or never learned these keys, applying
+   * the same {name} placeholder rules the contract gives i18n.js. Resolved at
+   * every call, never cached: validate() must answer in the language of the
+   * moment it is asked, not the language of page load. */
+  function t(key, params) {
+    const i18n = window.RIL.i18n;
+    if (i18n && typeof i18n.t === "function") {
+      const hit = i18n.t(key, params);
+      if (hit && hit !== key) return hit;
+    }
+    const lang = i18n && typeof i18n.lang === "function" && i18n.lang() === "en" ? "en" : "zh";
+    const raw = STRINGS[lang][key] || STRINGS.zh[key] || key;
+    return params
+      ? raw.replace(/\{(\w+)\}/g, (hit, name) => (params[name] == null ? hit : String(params[name])))
+      : raw;
+  }
 
   // Canonical order — every loop, and therefore every error list, follows it.
   // These are the server's own field names; see the naming rule up top.
@@ -43,14 +141,17 @@
     "openai_model",
   ];
 
+  // Field → i18n key of its display name. The KEYS are the server's names and
+  // must stay that way (see the naming rule up top); only the display strings
+  // moved into STRINGS so they can follow the page language.
   const LABELS = {
-    provider: "模型来源",
-    anthropic_api_key: "Anthropic API Key",
-    anthropic_model: "Anthropic 模型名",
-    anthropic_effort: "思考深度",
-    openai_base_url: "Base URL",
-    openai_api_key: "OpenAI API Key",
-    openai_model: "OpenAI 模型名",
+    provider: "settings.label.provider",
+    anthropic_api_key: "settings.label.anthropic_api_key",
+    anthropic_model: "settings.label.anthropic_model",
+    anthropic_effort: "settings.label.anthropic_effort",
+    openai_base_url: "settings.label.openai_base_url",
+    openai_api_key: "settings.label.openai_api_key",
+    openai_model: "settings.label.openai_model",
   };
 
   const PROVIDERS = ["auto", "claude", "openai"];
@@ -114,35 +215,43 @@
 
       if (value.length > MAX_LEN) {
         issues.push(
-          issue(field, `${LABELS[field]}超过 ${MAX_LEN} 个字符，多半是粘贴错了内容。`, "error")
+          issue(
+            field,
+            t("settings.err.too_long", { label: t(LABELS[field]), max: MAX_LEN }),
+            "error"
+          )
         );
         continue; // one clear complaint per field; the rest would be noise
       }
 
       if (!SPACE_OK.includes(field) && WHITESPACE.test(value)) {
         issues.push(
-          issue(field, `${LABELS[field]}中间不能有空格或换行，请检查是不是粘贴多了。`, "error")
+          issue(field, t("settings.err.whitespace", { label: t(LABELS[field]) }), "error")
         );
         continue;
       }
 
       if (!SENDABLE.test(value)) {
         issues.push(
-          issue(
-            field,
-            `${LABELS[field]}含有中文或不可打印字符，保存下来也用不了（“测试连接”更是发不出去）。`,
-            "error"
-          )
+          issue(field, t("settings.err.unsendable", { label: t(LABELS[field]) }), "error")
         );
         continue;
       }
 
       if (field === "provider" && !PROVIDERS.includes(value)) {
-        issues.push(issue(field, "模型来源只能填 auto、claude 或 openai。", "error"));
+        issues.push(issue(field, t("settings.err.provider"), "error"));
       }
 
       if (field === "anthropic_effort" && !EFFORTS.includes(value)) {
-        issues.push(issue(field, `思考深度只能填 ${EFFORTS.join("、")}。`, "error"));
+        // The list joiner is itself translated: enumeration commas differ
+        // between the two languages ("、" vs ", ").
+        issues.push(
+          issue(
+            field,
+            t("settings.err.effort", { levels: EFFORTS.join(t("settings.list_join")) }),
+            "error"
+          )
+        );
       }
 
       if (field === "anthropic_api_key" && !value.startsWith("sk-ant-")) {
@@ -151,7 +260,7 @@
         // callers drop warn-level issues before picking one to show, so this
         // never blocks a save — it is advisory only, and invisible until
         // someone decides to render it.
-        issues.push(issue(field, "Anthropic 密钥通常以 sk-ant- 开头，请确认没有填错。", "warn"));
+        issues.push(issue(field, t("settings.warn.key_prefix"), "warn"));
       }
 
       if (field === "openai_base_url") {
@@ -163,12 +272,10 @@
         // address down to scheme+host — so it asks for the key either way.
         // Say so here rather than letting the save 400.
         if (!config.openai_api_key) {
-          issues.push(
-            issue(field, "填了网关地址就必须同时填该网关的 API Key，否则请求会被后端拒绝。", "error")
-          );
+          issues.push(issue(field, t("settings.err.base_needs_key"), "error"));
         }
         if (!/^https?:\/\//i.test(value)) {
-          issues.push(issue(field, "Base URL 必须以 http:// 或 https:// 开头。", "error"));
+          issues.push(issue(field, t("settings.err.base_scheme"), "error"));
         }
         // The single most common way to get this wrong: providers.py builds
         // `${openai_base_url}/chat/completions` unconditionally and nothing
@@ -179,9 +286,7 @@
         // save that works. That is also why the match ignores them: the
         // backend will see ".../chat/completions" either way.
         if (/\/chat\/completions\/*$/i.test(value)) {
-          issues.push(
-            issue(field, "Base URL 只填到 /v1 为止，不要带 /chat/completions。", "error")
-          );
+          issues.push(issue(field, t("settings.err.base_path"), "error"));
         }
       }
     }
@@ -230,12 +335,14 @@
     // different endpoint that name describes something else, so it is dropped.
     const model = serverProvider === provider ? serverModel : "";
 
-    const name = claude ? "Claude" : "OpenAI 兼容网关";
+    // "Claude" and the field names are proper nouns in both languages; only
+    // the gateway's description and the sentence around them translate.
+    const name = claude ? "Claude" : t("settings.gateway_name");
     const note = configured
-      ? `当前使用服务端保存的 ${name} 凭据，在设置里可以随时换一份。`
+      ? t("settings.note.server_creds", { name })
       : claude
-        ? `服务端还没有 ${name} 的 API Key，定位会返回 not_configured。`
-        : `服务端的 ${name} 配置还差 ${hasBase ? "API Key" : "Base URL"}，定位会返回 not_configured。`;
+        ? t("settings.note.missing_key", { name })
+        : t("settings.note.missing_piece", { name, missing: hasBase ? "API Key" : "Base URL" });
 
     return { provider, model, configured, source: configured ? "server" : "none", note };
   }

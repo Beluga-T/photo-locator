@@ -81,6 +81,67 @@
     return Math.min(Math.max(value, low), high);
   }
 
+  // ── i18n ─────────────────────────────────────────────────────────────
+
+  /* The three sentences this panel can show, in both languages, keyed under
+   * "map.". Handed to i18n.js at load time: extend() when the loaded copy
+   * provides it, else the documented window.RIL.i18nExtra side-channel that
+   * i18n.js merges. The local copy is kept because the worst failure of a
+   * missing or mismatched i18n.js must be today's Chinese text, never a raw
+   * key on screen. The footer stats stay out of all this: coordinates,
+   * "± N KM" and the place name from app.js read the same in both languages. */
+  const STRINGS = {
+    zh: {
+      "map.no_token":
+        "还没有 Mapbox 令牌：设置 → 地图 里粘贴一个免费的 pk. 令牌即可启用交互地图。",
+      "map.blocked": "地图服务连不上，可能是网络或令牌受限。坐标见下方。",
+      "map.degraded": "静态图 · 不可缩放拖动",
+    },
+    en: {
+      "map.no_token":
+        "No Mapbox token yet: paste a free pk. token in Settings → Map to enable the interactive map.",
+      "map.blocked":
+        "The map service is unreachable — the network or the token may be restricted. Coordinates are shown below.",
+      "map.degraded": "Static image · no zoom or pan",
+    },
+  };
+
+  window.RIL = window.RIL || {};
+  if (window.RIL.i18n && typeof window.RIL.i18n.extend === "function") {
+    window.RIL.i18n.extend(STRINGS);
+  } else {
+    const extra = (window.RIL.i18nExtra = window.RIL.i18nExtra || {});
+    extra.zh = Object.assign(extra.zh || {}, STRINGS.zh);
+    extra.en = Object.assign(extra.en || {}, STRINGS.en);
+  }
+
+  /* Prefer i18n.js — it knows the page's current language — and fall back to
+   * the table above when it is absent or never learned these keys. None of the
+   * map strings carry {placeholders}, so no interpolation is needed here. */
+  function t(key) {
+    const i18n = window.RIL.i18n;
+    if (i18n && typeof i18n.t === "function") {
+      const hit = i18n.t(key);
+      if (hit && hit !== key) return hit;
+    }
+    const lang = i18n && typeof i18n.lang === "function" && i18n.lang() === "en" ? "en" : "zh";
+    return STRINGS[lang][key] || STRINGS.zh[key] || key;
+  }
+
+  /* Tag a node for i18n.js's apply() walk so a live language switch
+   * retranslates it in place — but only when the live dictionary actually
+   * knows the key. A tag it cannot resolve would put the raw key on screen at
+   * the first switch; untagged text merely stays in the language it was born
+   * in, which is the lesser failure. */
+  function tagI18n(node, key) {
+    const i18n = window.RIL.i18n;
+    if (i18n && typeof i18n.t === "function") {
+      const hit = i18n.t(key);
+      if (hit && hit !== key) node.dataset.i18n = key;
+    }
+    return node;
+  }
+
   // ── Theme ────────────────────────────────────────────────────────────
 
   /* The attribute app.js writes wins; without it we are on the OS default.
@@ -274,11 +335,8 @@
      * a missing setting the reader can fix, the other is a blocked network. */
     function tierNone(reason) {
       clear(canvas);
-      const message =
-        reason === "blocked"
-          ? "地图服务连不上，可能是网络或令牌受限。坐标见下方。"
-          : "还没有 Mapbox 令牌：设置 → 地图 里粘贴一个免费的 pk. 令牌即可启用交互地图。";
-      canvas.append(el("p", "map__none", message));
+      const key = reason === "blocked" ? "map.blocked" : "map.no_token";
+      canvas.append(tagI18n(el("p", "map__none", t(key)), key));
     }
 
     function tierStatic() {
@@ -300,7 +358,8 @@
       // Say it on screen too. A flat picture where an interactive map is
       // expected reads as a broken map, not as a fallback.
       if (!foot.querySelector(".map__degraded")) {
-        foot.prepend(el("span", "map__stat map__degraded", "静态图 · 不可缩放拖动"));
+        const chip = el("span", "map__stat map__degraded", t("map.degraded"));
+        foot.prepend(tagI18n(chip, "map.degraded"));
       }
     }
 

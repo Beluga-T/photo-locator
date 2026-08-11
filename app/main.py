@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request, UploadFile
+from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -185,6 +185,18 @@ def _log_located(result: dict, effective: Any, elapsed_ms: int, progress: str = 
         mask(credential),
         progress,
     )
+
+
+def _lang_kwargs(lang: str) -> dict[str, str]:
+    """The provider kwargs for the request's `lang` form field.
+
+    Anything but an explicit "en" means Chinese — a bad value is not worth
+    failing an upload over, so it is silently the default rather than a 400.
+    The default is not forwarded at all: the providers already default to "zh",
+    and keeping the plain two-argument call for it means every existing caller
+    and stand-in for locate()/locate_stream() works untouched.
+    """
+    return {"lang": "en"} if lang == "en" else {}
 
 
 def _client_ip(request: Request) -> str:
@@ -355,8 +367,14 @@ async def api_verify(request: Request) -> JSONResponse:
 
 
 @app.post("/api/locate/stream")
-async def api_locate_stream(request: Request, image: UploadFile) -> Response:
+async def api_locate_stream(
+    request: Request, image: UploadFile, lang: str = Form("zh")
+) -> Response:
     """Same job as /api/locate, but reported as it happens.
+
+    `lang` ∈ {"zh", "en"} picks the language of the model's prose fields;
+    anything else silently means "zh". The names keep their fixed semantics
+    either way — see _lang_kwargs.
 
     Emits Server-Sent Events so the page keeps moving while the model is still
     writing the evidence chain:
@@ -409,7 +427,7 @@ async def api_locate_stream(request: Request, image: UploadFile) -> Response:
         # plain ladder streams none either.
         partials = elements = 0
         try:
-            async for kind, data in locate_stream(prepared, effective):
+            async for kind, data in locate_stream(prepared, effective, **_lang_kwargs(lang)):
                 if kind == "partial":
                     partials += 1
                     if isinstance(data, dict) and "index" in data:
@@ -455,7 +473,9 @@ async def api_locate_stream(request: Request, image: UploadFile) -> Response:
 
 
 @app.post("/api/locate")
-async def api_locate(request: Request, image: UploadFile) -> JSONResponse:
+async def api_locate(
+    request: Request, image: UploadFile, lang: str = Form("zh")
+) -> JSONResponse:
     if _rate_limited(_client_ip(request)):
         return _error("rate_limited", "请求太频繁了，请过一会儿再试。", 429)
 
@@ -481,7 +501,7 @@ async def api_locate(request: Request, image: UploadFile) -> JSONResponse:
 
     started = time.monotonic()
     try:
-        result = await locate(prepared, effective)
+        result = await locate(prepared, effective, **_lang_kwargs(lang))
     except LocateError as exc:
         log.warning("locate failed [%s] %s", exc.code, exc.message)
         return _error(exc.code, exc.message, exc.status)

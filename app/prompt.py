@@ -69,6 +69,51 @@ USER_INSTRUCTION = """\
 """
 
 
+# ── Output language ──────────────────────────────────────────────────────
+# The UI is bilingual, and the locate request's optional "lang" field picks the
+# language of the model's PROSE — summary, evidence observations and
+# implications, alternatives reasons, notes. Nothing structural moves with it:
+# name_zh stays the Chinese name and name_en the English one in both modes
+# (they are schema semantics, not UI language), and the「未确定」sentinel keeps
+# its exact bytes because providers.normalize matches it literally. That is why
+# RESULT_SCHEMA below is a single constant with no language switch — its
+# descriptions state field semantics, never the prose language.
+
+# The one sentence in SYSTEM_PROMPT that pins the prose language. system_prompt()
+# swaps it for English; the self-check asserts the anchor is still present
+# verbatim, so a future rewording cannot silently turn the swap into a no-op.
+_PROSE_RULE_ZH = "- 所有叙述性文字用简体中文，简洁、具体、不用套话。"
+_PROSE_RULE_EN = (
+    "- Write every narrative field — summary, each evidence observation and "
+    "implication, each alternative's reason, notes — in English: concise, "
+    "specific, no boilerplate. This changes prose only: name_zh is still the "
+    "Chinese name, name_en still the English name or Latin transliteration, and "
+    "a level the evidence cannot support still gets「未确定」in name_zh with an "
+    "empty name_en."
+)
+
+USER_INSTRUCTION_EN = """\
+Analyze this photo and determine where it was taken.
+Be as precise as the evidence allows: name the neighbourhood if you can, stop at the country if you must.
+First state in precision the finest level you actually established, then fill in the names level by level; for any level the evidence cannot support, put「未确定」in name_zh and an empty string in name_en — never a best guess.
+Answer per the JSON schema with your verdict, reasoning and alternative locations, writing all narrative text in English.
+"""
+
+
+def system_prompt(lang: str = "zh") -> str:
+    """The system prompt for one request. Only the prose-language rule varies;
+    anything that is not an explicit "en" gets the Chinese original unchanged."""
+    if lang == "en":
+        return SYSTEM_PROMPT.replace(_PROSE_RULE_ZH, _PROSE_RULE_EN)
+    return SYSTEM_PROMPT
+
+
+def user_instruction(lang: str = "zh") -> str:
+    """The user-turn instruction for one request, written in the language the
+    prose should come back in — the strongest single cue the model gets."""
+    return USER_INSTRUCTION_EN if lang == "en" else USER_INSTRUCTION
+
+
 PRECISION_LEVELS = ["country", "region", "city", "locality"]
 
 
@@ -226,12 +271,35 @@ if __name__ == "__main__":
     assert encoded.index('"precision"') < encoded.index('"country"'), "dumps lost the order"
     print(f"  ok  survives json.dumps in order ({len(encoded)} chars)")
 
-    for label, text in (("SYSTEM_PROMPT", SYSTEM_PROMPT), ("USER_INSTRUCTION", USER_INSTRUCTION)):
+    for label, text in (
+        ("SYSTEM_PROMPT", SYSTEM_PROMPT),
+        ("USER_INSTRUCTION", USER_INSTRUCTION),
+        ("system_prompt(en)", system_prompt("en")),
+        ("user_instruction(en)", user_instruction("en")),
+    ):
+        # Both languages carry the same discipline: precision leads, and the
+        # 「未确定」sentinel keeps its exact bytes — normalize matches it literally.
         assert "precision" in text and "未确定" in text, label
         assert text.endswith("\n"), label
     # The prompt must not still describe precision as something written last.
     assert "上面各字段" not in SYSTEM_PROMPT, "SYSTEM_PROMPT still says precision comes after the names"
     print("  ok  prompts agree that precision is declared first")
+
+    # zh is byte-for-byte the original — the language switch must cost the
+    # existing behaviour nothing, in either function or on an unknown value.
+    assert system_prompt("zh") == SYSTEM_PROMPT and system_prompt("nope") == SYSTEM_PROMPT
+    assert user_instruction("zh") == USER_INSTRUCTION and user_instruction("nope") == USER_INSTRUCTION
+    # en actually swaps: the anchor sentence must exist for replace() to hit,
+    # and the result must demand English prose while keeping the name semantics.
+    assert _PROSE_RULE_ZH in SYSTEM_PROMPT, "anchor drifted; system_prompt('en') is a no-op"
+    en_system = system_prompt("en")
+    assert en_system != SYSTEM_PROMPT and _PROSE_RULE_ZH not in en_system
+    assert _PROSE_RULE_EN in en_system and "English" in en_system
+    for field in ("summary", "observation", "implication", "reason", "notes"):
+        assert field in _PROSE_RULE_EN, field  # every prose field is named
+    assert "name_zh" in _PROSE_RULE_EN and "name_en" in _PROSE_RULE_EN
+    assert "English" in user_instruction("en")
+    print("  ok  both languages produce consistent prompts (en prose, fixed name semantics)")
 
     assert len(EVIDENCE_CATEGORIES) == len(set(EVIDENCE_CATEGORIES))
     assert RESULT_SCHEMA["properties"]["evidence"]["items"]["properties"]["category"]["enum"] == (

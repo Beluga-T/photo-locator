@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>照片定位 · Reverse Image Location</title>
-<meta name="description" content="上传一张照片，模型只看画面本身，推断它拍摄于哪个国家、哪个州省、哪个城市，并给出完整的推理依据。" />
+<title data-i18n="app.title">照片定位 · Reverse Image Location</title>
+<meta name="description" data-i18n-attr="content:app.desc" content="上传一张照片，模型只看画面本身，推断它拍摄于哪个国家、哪个州省、哪个城市，并给出完整的推理依据。" />
 <meta name="color-scheme" content="dark light" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23E5487F' stroke-width='2.5'/%3E%3Cpath d='M16 0v6M16 26v6M0 16h6M26 16h6' stroke='%23E5487F' stroke-width='2.5'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/styles.css" />
@@ -20,7 +20,7 @@
 </head>
 <body>
 
-<a class="skip" href="#workspace">跳到主要内容</a>
+<a class="skip" href="#workspace" data-i18n="a11y.skip">跳到主要内容</a>
 
 <header class="bar">
   <div class="bar__mark">
@@ -30,17 +30,18 @@
       <path d="M16 1v6.5M16 24.5V31M1 16h6.5M24.5 16H31" />
     </svg>
     <span class="bar__names">
-      <b>照片定位</b>
-      <i>Reverse Image Location</i>
+      <b data-i18n="brand.name">照片定位</b>
+      <i data-i18n="brand.sub">Reverse Image Location</i>
     </span>
   </div>
 
   <div class="bar__side">
-    <span class="chip" id="model-chip" title="当前后端连接的模型">
+    <span class="chip" id="model-chip" title="当前后端连接的模型" data-i18n-attr="title:chip.title">
       <span class="chip__dot" data-state="unknown"></span>
-      <span id="model-name">连接中…</span>
+      <span id="model-name" data-i18n="chip.connecting">连接中…</span>
     </span>
-    <button class="icon-btn" id="settings-open" type="button" aria-label="打开设置" title="设置 · 更换模型密钥与地图令牌">
+    <button class="icon-btn" id="settings-open" type="button" aria-label="打开设置" title="设置 · 更换模型密钥与地图令牌"
+            data-i18n-attr="aria-label:settings.open.aria;title:settings.open.title">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 7h10M18 7h2M4 17h6M14 17h6M4 12h2M10 12h10" />
         <circle cx="16" cy="7" r="2" />
@@ -48,7 +49,7 @@
         <circle cx="8" cy="12" r="2" />
       </svg>
     </button>
-    <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换深浅主题">
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换深浅主题" data-i18n-attr="aria-label:theme.aria">
       <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-sun">
         <circle cx="12" cy="12" r="4.5" />
         <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
@@ -57,14 +58,16 @@
         <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
       </svg>
     </button>
+    <!-- The glyph names the language you switch TO; i18n.js keeps it in sync. -->
+    <button class="icon-btn icon-btn--lang" id="lang-toggle" type="button" aria-label="Switch to English" title="Switch to English">EN</button>
   </div>
 </header>
 
 <main>
   <section class="thesis">
-    <p class="eyebrow">视觉推断 · 无需 GPS 元数据</p>
-    <h1>这张照片，拍在哪里？</h1>
-    <p class="thesis__lede">
+    <p class="eyebrow" data-i18n="thesis.eyebrow">视觉推断 · 无需 GPS 元数据</p>
+    <h1 data-i18n="thesis.title">这张照片，拍在哪里？</h1>
+    <p class="thesis__lede" data-i18n="thesis.lede">
       上传一张照片。系统会剥掉它的 EXIF 信息，只把画面交给模型，
       从地形、文字、路面标线、电线杆、车牌这些细节一路收敛，
       给出国家、州省、城市的判断，以及每一条推理依据。
@@ -74,9 +77,9 @@
   <div class="rig" id="workspace">
 
     <!-- ─────────────────────────── 左：图版 ─────────────────────────── -->
-    <section class="plate" aria-label="图片工作区">
+    <section class="plate" aria-label="图片工作区" data-i18n-attr="aria-label:plate.aria">
       <div class="plate__head">
-        <span class="label">图版 / PLATE</span>
+        <span class="label" data-i18n="plate.label">图版 / PLATE</span>
         <span class="label label--dim" id="plate-dims">—</span>
       </div>
 
@@ -94,8 +97,8 @@
             <path d="M24 32V10M24 10l-8 8M24 10l8 8" />
             <path d="M8 30v6a2 2 0 0 0 2 2h28a2 2 0 0 0 2-2v-6" />
           </svg>
-          <span class="drop__title">把照片拖进来</span>
-          <span class="drop__hint" id="drop-hint">或点击选择 · 也可以直接 Ctrl&nbsp;+&nbsp;V 粘贴</span>
+          <span class="drop__title" data-i18n="drop.title">把照片拖进来</span>
+          <span class="drop__hint" id="drop-hint" data-i18n="drop.hint">或点击选择 · 也可以直接 Ctrl&nbsp;+&nbsp;V 粘贴</span>
         </button>
 
         <div class="corner-read" id="corner-read" aria-hidden="true" hidden>
@@ -103,7 +106,7 @@
           <span id="corner-size">—</span>
         </div>
 
-        <img class="frame__photo" id="photo" alt="待分析的照片" hidden />
+        <img class="frame__photo" id="photo" alt="待分析的照片" data-i18n-attr="alt:photo.alt" hidden />
         <div class="scan" id="scan" aria-hidden="true"></div>
         <div class="fix" id="fix" aria-hidden="true">
           <span class="fix__ring"></span>
@@ -117,37 +120,37 @@
         <button class="btn btn--primary" id="run" type="button" disabled>
           <span id="run-label">开始定位</span>
         </button>
-        <button class="btn btn--ghost" id="cancel" type="button" hidden>取消</button>
-        <button class="btn btn--ghost" id="reset" type="button" hidden>换一张</button>
+        <button class="btn btn--ghost" id="cancel" type="button" data-i18n="run.cancel" hidden>取消</button>
+        <button class="btn btn--ghost" id="reset" type="button" data-i18n="run.reset" hidden>换一张</button>
       </div>
 
       <p class="plate__note" id="exif-note" hidden></p>
 
       <div class="rail__wrap" id="rail-wrap" hidden>
-        <span class="label">历史 / HISTORY</span>
+        <span class="label" data-i18n="rail.label">历史 / HISTORY</span>
         <div class="rail" id="rail" role="list"></div>
       </div>
 
       <p class="hints" id="hints">
-        <span><b class="kbd">Enter</b> 开始定位</span>
-        <span><b class="kbd">Ctrl</b>+<b class="kbd">V</b> 粘贴</span>
-        <span><b class="kbd">R</b> 换一张</span>
-        <span><b class="kbd">T</b> 切换主题</span>
+        <span><b class="kbd">Enter</b> <span data-i18n="hints.run">开始定位</span></span>
+        <span><b class="kbd">Ctrl</b>+<b class="kbd">V</b> <span data-i18n="hints.paste">粘贴</span></span>
+        <span><b class="kbd">R</b> <span data-i18n="hints.reset">换一张</span></span>
+        <span><b class="kbd">T</b> <span data-i18n="hints.theme">切换主题</span></span>
       </p>
     </section>
 
     <!-- ─────────────────────────── 右：读数 ─────────────────────────── -->
     <section class="readout" id="readout" aria-live="polite" aria-busy="false">
       <div class="panel" id="idle-panel">
-        <span class="label">分析维度 / SIGNALS READ</span>
+        <span class="label" data-i18n="idle.label">分析维度 / SIGNALS READ</span>
         <ul class="signals">
-          <li><b>地形与植被</b><span>山形、海岸线、树种与季相，先把范围收到气候带</span></li>
-          <li><b>文字与标识</b><span>招牌、路牌、域名后缀、电话区号——单条最强的线索</span></li>
-          <li><b>道路与交通</b><span>靠左还是靠右、车道线颜色、护栏与防撞柱造型</span></li>
-          <li><b>基础设施</b><span>电线杆横担、路灯灯头、井盖、消防栓，各国高度定型</span></li>
-          <li><b>光照与阴影</b><span>阴影方向与长度反推半球、纬度和大致时刻</span></li>
+          <li><b data-i18n="idle.terrain">地形与植被</b><span data-i18n="idle.terrain.d">山形、海岸线、树种与季相，先把范围收到气候带</span></li>
+          <li><b data-i18n="idle.text">文字与标识</b><span data-i18n="idle.text.d">招牌、路牌、域名后缀、电话区号——单条最强的线索</span></li>
+          <li><b data-i18n="idle.road">道路与交通</b><span data-i18n="idle.road.d">靠左还是靠右、车道线颜色、护栏与防撞柱造型</span></li>
+          <li><b data-i18n="idle.infra">基础设施</b><span data-i18n="idle.infra.d">电线杆横担、路灯灯头、井盖、消防栓，各国高度定型</span></li>
+          <li><b data-i18n="idle.light">光照与阴影</b><span data-i18n="idle.light.d">阴影方向与长度反推半球、纬度和大致时刻</span></li>
         </ul>
-        <p class="panel__foot">
+        <p class="panel__foot" data-i18n="idle.foot">
           结果给到城市一级，附带 0–100 的置信度与 2–3 个备选地点。
           EXIF 中的 GPS 不会送进模型，也不会跟着照片一起存下来。
         </p>
@@ -158,17 +161,17 @@
 </main>
 
 <footer class="foot">
-  <span id="foot-store">分析过的照片和结论会保存在运行这个服务的机器上，用于回看，可在设置里一键清空。</span>
+  <span id="foot-store" data-i18n="foot.store">分析过的照片和结论会保存在运行这个服务的机器上，用于回看，可在设置里一键清空。</span>
   <span class="foot__sep" aria-hidden="true">·</span>
-  <span id="foot-map">地图由 Mapbox 渲染，浏览器会把推断出的坐标发给它。</span>
+  <span id="foot-map" data-i18n="foot.map.on">地图由 Mapbox 渲染，浏览器会把推断出的坐标发给它。</span>
   <span class="foot__sep" aria-hidden="true">·</span>
-  <span>推断结果为概率判断，请勿作为唯一依据。</span>
+  <span data-i18n="foot.caveat">推断结果为概率判断，请勿作为唯一依据。</span>
 </footer>
 
 <dialog class="sheet" id="settings" aria-labelledby="settings-title">
   <div class="sheet__head">
-    <h2 class="sheet__title" id="settings-title">设置</h2>
-    <button class="icon-btn" id="settings-close" type="button" aria-label="关闭设置">
+    <h2 class="sheet__title" id="settings-title" data-i18n="settings.title">设置</h2>
+    <button class="icon-btn" id="settings-close" type="button" aria-label="关闭设置" data-i18n-attr="aria-label:settings.close.aria">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M6 6l12 12M18 6L6 18" />
       </svg>
@@ -176,18 +179,18 @@
   </div>
 
   <div class="tabs" role="tablist">
-    <button class="tab" id="tab-model" type="button" role="tab" aria-selected="true" aria-controls="pane-model">模型</button>
-    <button class="tab" id="tab-map" type="button" role="tab" aria-selected="false" aria-controls="pane-map">地图</button>
-    <button class="tab" id="tab-data" type="button" role="tab" aria-selected="false" aria-controls="pane-data">数据</button>
+    <button class="tab" id="tab-model" type="button" role="tab" aria-selected="true" aria-controls="pane-model" data-i18n="settings.tab.model">模型</button>
+    <button class="tab" id="tab-map" type="button" role="tab" aria-selected="false" aria-controls="pane-map" data-i18n="settings.tab.map">地图</button>
+    <button class="tab" id="tab-data" type="button" role="tab" aria-selected="false" aria-controls="pane-data" data-i18n="settings.tab.data">数据</button>
   </div>
 
   <section class="pane" id="pane-model" role="tabpanel" aria-labelledby="tab-model">
     <div class="field">
       <label class="label" for="provider">PROVIDER</label>
       <select class="input" id="provider">
-        <option value="auto">auto · 填了网关就走网关</option>
+        <option value="auto" data-i18n="settings.provider.auto">auto · 填了网关就走网关</option>
         <option value="claude">Anthropic Claude</option>
-        <option value="openai">OpenAI 兼容网关</option>
+        <option value="openai" data-i18n="settings.provider.openai">OpenAI 兼容网关</option>
       </select>
     </div>
 
@@ -198,7 +201,7 @@
         <div class="secret">
           <input class="input" id="anthropic-key" type="password" placeholder="sk-ant-…"
                  autocomplete="off" autocapitalize="off" spellcheck="false" />
-          <button class="mini" data-reveal="anthropic-key" type="button">显示</button>
+          <button class="mini" data-reveal="anthropic-key" type="button" data-i18n="settings.reveal">显示</button>
         </div>
       </div>
       <div class="field">
@@ -207,20 +210,20 @@
                autocomplete="off" autocapitalize="off" spellcheck="false" />
       </div>
       <div class="field">
-        <label class="label label--dim" for="anthropic-effort">EFFORT · 思考深度</label>
+        <label class="label label--dim" for="anthropic-effort" data-i18n="settings.effort.label">EFFORT · 思考深度</label>
         <select class="input" id="anthropic-effort">
-          <option value="low">low · 最快，够用就行</option>
-          <option value="medium">medium · 提速首选</option>
-          <option value="high">high · Anthropic 默认</option>
-          <option value="xhigh">xhigh · 更细的推理</option>
-          <option value="max">max · 最慢，正确性优先</option>
+          <option value="low" data-i18n="settings.effort.low">low · 最快，够用就行</option>
+          <option value="medium" data-i18n="settings.effort.medium">medium · 提速首选</option>
+          <option value="high" data-i18n="settings.effort.high">high · Anthropic 默认</option>
+          <option value="xhigh" data-i18n="settings.effort.xhigh">xhigh · 更细的推理</option>
+          <option value="max" data-i18n="settings.effort.max">max · 最慢，正确性优先</option>
         </select>
         <p class="field__hint" id="effort-hint"></p>
       </div>
     </fieldset>
 
     <fieldset class="group" id="group-openai">
-      <legend class="label">OPENAI 兼容网关</legend>
+      <legend class="label" data-i18n="settings.openai.legend">OPENAI 兼容网关</legend>
       <div class="field">
         <label class="label label--dim" for="openai-base">BASE URL</label>
         <input class="input" id="openai-base" placeholder="https://…/v1"
@@ -231,7 +234,7 @@
         <div class="secret">
           <input class="input" id="openai-key" type="password" placeholder="sk-…"
                  autocomplete="off" autocapitalize="off" spellcheck="false" />
-          <button class="mini" data-reveal="openai-key" type="button">显示</button>
+          <button class="mini" data-reveal="openai-key" type="button" data-i18n="settings.reveal">显示</button>
         </div>
       </div>
       <div class="field">
@@ -255,46 +258,39 @@
 
   <section class="pane" id="pane-data" role="tabpanel" aria-labelledby="tab-data" hidden>
     <div class="field">
-      <span class="label">已保存的历史</span>
-      <p class="field__hint" id="history-hint">读取中…</p>
+      <span class="label" data-i18n="settings.history.label">已保存的历史</span>
+      <p class="field__hint" id="history-hint" data-i18n="settings.history.loading">读取中…</p>
     </div>
     <div class="acts">
-      <button class="mini" id="history-clear" type="button">清空历史</button>
+      <button class="mini" id="history-clear" type="button" data-i18n="settings.history.clear">清空历史</button>
     </div>
     <p class="sheet__foot">
-      每次分析成功后，送进模型的那张 JPEG 和它的结论会存在运行这个服务的机器上
-      （<code>data/shots/</code> 与 <code>data/history.json</code>），保留最近 20 张，
-      超出的连图片一起删除。存的是缩放并<b>剥掉 EXIF 之后</b>的那张——原图里的 GPS 既不进模型，也不落盘。
+      <span data-i18n="settings.data.f1">每次分析成功后，送进模型的那张 JPEG 和它的结论会存在运行这个服务的机器上（</span><code>data/shots/</code><span data-i18n="settings.data.and"> 与 </span><code>data/history.json</code><span data-i18n="settings.data.f2">），保留最近 20 张，超出的连图片一起删除。存的是缩放并</span><b data-i18n="settings.data.strip">剥掉 EXIF 之后</b><span data-i18n="settings.data.f3">的那张——原图里的 GPS 既不进模型，也不落盘。</span>
     </p>
   </section>
 
   <div class="sheet__acts">
-    <button class="btn btn--primary" id="settings-save" type="button">保存并生效</button>
-    <button class="btn btn--ghost" id="settings-test" type="button">测试连接</button>
-    <button class="btn btn--ghost" id="settings-revert" type="button">清除已保存的配置</button>
+    <button class="btn btn--primary" id="settings-save" type="button" data-i18n="settings.save">保存并生效</button>
+    <button class="btn btn--ghost" id="settings-test" type="button" data-i18n="settings.test">测试连接</button>
+    <button class="btn btn--ghost" id="settings-revert" type="button" data-i18n="settings.revert">清除已保存的配置</button>
   </div>
 
   <p class="sheet__foot">
-    这里填的内容<b>保存在运行这个服务的机器上</b>（<code>data/config.json</code>，仅属主可读），
-    这样换浏览器、重启程序都还在——发版时没有 <code>.env</code> 可改，配置得由界面自己记住。
-    密钥不会回显：读出来只有掩码，日志里也只有掩码。
-    留空的输入框表示"沿用服务端已有的值"，清空并保存则是删掉它。
-    <b>这个端口没有鉴权</b>，所以只能绑在本机回环上——详见 README 的「安全边界」。
-    Mapbox 只填公开令牌（<code>pk.</code> 开头），<code>sk.</code> 开头的私密令牌绝不能放进浏览器。
-    这套做法适合本机自用；把服务暴露到公网前请先看 README 的「边界与隐私」。
+    <span data-i18n="settings.foot.t0">这里填的内容</span><b data-i18n="settings.foot.b1">保存在运行这个服务的机器上</b><span data-i18n="settings.foot.t1">（</span><code>data/config.json</code><span data-i18n="settings.foot.t2">，仅属主可读），这样换浏览器、重启程序都还在——发版时没有 </span><code>.env</code><span data-i18n="settings.foot.t3"> 可改，配置得由界面自己记住。密钥不会回显：读出来只有掩码，日志里也只有掩码。留空的输入框表示“沿用服务端已有的值”，清空并保存则是删掉它。</span><b data-i18n="settings.foot.b2">这个端口没有鉴权</b><span data-i18n="settings.foot.t4">，所以只能绑在本机回环上——详见 README 的「安全边界」。 Mapbox 只填公开令牌（</span><code>pk.</code><span data-i18n="settings.foot.t5"> 开头），</span><code>sk.</code><span data-i18n="settings.foot.t6"> 开头的私密令牌绝不能放进浏览器。这套做法适合本机自用；把服务暴露到公网前请先看 README 的「边界与隐私」。</span>
   </p>
 </dialog>
 
 <div class="veil" id="veil" aria-hidden="true">
   <div class="veil__box">
-    把照片放在这里
-    <span class="label">松手即可载入</span>
+    <span data-i18n="veil.title">把照片放在这里</span>
+    <span class="label" data-i18n="veil.sub">松手即可载入</span>
   </div>
 </div>
 
 <div class="toast-rail" id="toasts" role="status" aria-live="polite"></div>
 
 <script src="/vendor/motion.min.js"></script>
+<script src="/i18n.js"></script>
 <script src="/globe.js"></script>
 <script src="/map.js"></script>
 <script src="/settings.js"></script>

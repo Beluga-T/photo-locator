@@ -507,6 +507,18 @@ select.input option { background: var(--surface); color: var(--ink); }
   white-space: nowrap;
 }
 
+/* ── Language toggle ─────────────────────────────────────────────── */
+/* Text where its header siblings use icons: the glyph names the language you
+ * switch TO ("EN" on the Chinese page, "中" on the English one), so it has to
+ * read as a label, not decoration. Same 34px hit target as .icon-btn. */
+.icon-btn--lang {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
+
 /* ── Motion preferences ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .globe__pulse { animation: none; opacity: 0.3; }
