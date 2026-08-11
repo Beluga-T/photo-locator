@@ -1,0 +1,29 @@
+# Build-time only. Deliberately NOT in requirements.txt.
+#
+# Nothing here is imported by the running app, and nobody who downloads a
+# release ever installs it: PyInstaller is the compiler that produces the
+# executable, not a dependency of it. Adding it to requirements.txt would make
+# every `python run.py` from a fresh clone download a build toolchain it will
+# never use.
+#
+#     python -m pip install -r requirements.txt -r requirements-build.txt
+#     python -m PyInstaller --clean --noconfirm photo-locator.spec
+#
+# requirements.txt has to be installed alongside this one: PyInstaller works out
+# what to bundle by importing the app in the environment it runs in, so an
+# environment without fastapi, uvicorn, anthropic and pillow builds an
+# executable that is missing them.
+#
+# Pinned exactly, not floated with >=. This is the toolchain for a binary that
+# strangers download and cannot inspect: the bootloader, the hooks and the
+# module-graph analysis all live in these two packages, so an unattended
+# upgrade between two releases silently changes what ends up inside the
+# artefact. Bump the pins on purpose, rebuild, and actually run the executable
+# before tagging.
+pyinstaller==6.22.0
+
+# Not a transitive extra to ignore -- this is the hook set that decides how
+# pillow's shared libraries and pydantic's compiled core get collected, and it
+# publishes a new version most months. Pinning PyInstaller without pinning this
+# would leave the half that changes most often unpinned.
+pyinstaller-hooks-contrib==2026.6

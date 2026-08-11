@@ -4,6 +4,88 @@
 
 上传一张照片，视觉模型**只看画面**（EXIF 在进模型之前就被剥掉了）推断它拍摄于世界上的哪个地方，并给出坐标、可信半径和一整条「观察 → 推论」的证据链。
 
+## 下载即用（不需要 Python）
+
+**这是最省事的一条路，也是唯一一条什么都不用装的路。** 打开 [Releases 页面](https://github.com/Beluga-T/photo-locator/releases/latest)，展开 **Assets**，挑你系统对应的那个压缩包，解开，双击里面的程序。浏览器会自己打开——通常是 <http://127.0.0.1:8000/>，但 8000 被占用时它会自动改用下一个空闲端口，所以**以控制台窗口里打印的那个地址为准**。想固定端口或不自动开浏览器，从终端带参数启动：`photo-locator --port 8010`、`photo-locator --no-browser`。
+
+有两件事对所有这些构建都成立，写在这里而不是塞进脚注：
+
+- **它们没有签名。** 背后没有 Apple 开发者证书，也没有 Windows 代码签名证书——那些是按年、按身份收费的东西，而这是一个免费的 MIT 项目。所以第一次启动一定会被系统拦下来，并且弹出一句听上去像是在指控你的话。下面按平台写清楚了它到底会说什么、以及点哪个按钮能过去。**没人提前告诉你的警告，看上去就是病毒**；这一条是预料之中的，你应该能一眼认出来。
+- **API Key 仍然要你自己的。** 程序里没有内置任何密钥，也不会去花别人的钱：启动之后点右上角齿轮，把你的 Key 粘进去，「保存并生效」。「API Key 从哪来、一次多少钱」那一节原封不动地适用。
+
+这个构建和其他启动方式一样只绑 `127.0.0.1`，而且**所有接口都没有任何鉴权**——在你想办法把它开出去之前，请先读完「安全边界」。
+
+### 我该下哪一个？
+
+| 你想 | 下这个 | 需要先装 |
+| --- | --- | --- |
+| 只是想用这个应用 | 你系统对应的开箱即用构建——本节 | 什么都不用 |
+| 读代码、改代码、二次开发 | 源码，然后 `python run.py`——见「快速开始」 | Python 3.11+ |
+| 跑在服务器 / NAS / 家用小主机上 | 容器镜像——见「用 Docker 启动」 | Docker |
+
+### Windows
+
+1. 下载文件名里带 `windows` 的那个资产——一个 `.zip`，名字形如 `photo-locator-<版本号>-windows-x64.zip`。
+2. **先解压。** 右键 →「全部解压缩」。**不要**在还开着 zip 预览窗口的时候直接双击里面的 `.exe`：Windows 会很痛快地从一个临时目录里把它跑起来，而那个目录之后会被删掉——你存的 API Key 和历史记录跟着一起没。
+3. 双击解压出来的文件夹里的 `photo-locator.exe`。
+4. 会弹出一整块蓝底的框：**「Windows 已保护你的电脑」**（英文界面是 "Windows protected your PC"），而且只给你一个「不运行」按钮。那是 SmartScreen 对一个没有代码签名、它又没见过的可执行文件的反应——它做的是信誉检查，不是病毒报告，根本没扫描任何东西。点**「更多信息」**，再点**「仍要运行」**。每个版本只问一次。
+
+程序运行期间会一直留着一个控制台窗口，关掉它就等于停掉服务。解压出来的文件夹要放在你写得进去的地方——`文档`、`D:\`，你自己的任何目录都行——**别**放进 `C:\Program Files`，那里写文件要管理员权限，而这个应用是紧挨着自己写数据的（见下）。
+
+### macOS
+
+1. 下载文件名里带 `macos` 的那个资产并解压——在 Finder 里双击 `.zip` 就够了。如果列了两个，`arm64` 是 Apple Silicon（M1 及以后），`x64` 是 Intel。
+2. **第一次别直接双击。** 因为这个构建既没签名也没公证，Gatekeeper 会一口回绝，只给你一个「移到废纸篓」——那个对话框上根本没有「仍要打开」。正确的走法是：**右键（或按住 Control 点）`photo-locator` →「打开」**，在随后弹出的对话框里再点一次**「打开」**。第二个对话框才是这一整套动作的意义所在：它上面有一个「打开」按钮，而双击永远不会给你看到它。做过一次之后 macOS 就记住这个文件了，以后正常双击即可。
+3. **macOS 15 Sequoia 及更新的系统上，苹果把这条右键后门取消了。** 在那里第一次启动无论怎么点都会被拦；去**「系统设置 → 隐私与安全性」**，翻到最下面，在提到 `photo-locator` 的那行旁边点**「仍要打开」**。还是同一次性授权，只是换了个地方给。
+
+更愿意在终端里一行解决？在解压出来的目录里跑一次 `xattr -d com.apple.quarantine ./photo-locator`，它会把触发上面这一整套的隔离属性去掉，之后直接双击就能开。两条路完全等价，区别只在于这一条需要你打开终端，而右键那条不需要。
+
+### Linux
+
+```bash
+tar -xzf photo-locator-*-linux-x64.tar.gz
+cd photo-locator-*/
+chmod +x photo-locator
+./photo-locator
+```
+
+`tar` 一般会保留可执行位，所以 `chmod +x` 通常是多余的一步——但 `./photo-locator` 要是回你一句 `Permission denied`，就把它补上。这里没有 Gatekeeper / SmartScreen 那一套，文件直接就能跑。
+
+> **glibc 下限：2.39** ——大致对应 Ubuntu 24.04+、Debian 13+、Fedora 40+。二进制动态链接的是构建它的 CI 镜像（`ubuntu-24.04`）里的 glibc，而 glibc 只向前兼容：在更老的系统上起不来，报的是 `/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found`。低于这个下限的用户请改用「快速开始」里的 `python run.py` 或「用 Docker 启动」——那两条路不受它影响。
+
+### 数据存在哪里
+
+**就在可执行文件旁边。** 这个构建是刻意做成**便携式**的：它不往注册表、`%APPDATA%`、`~/Library` 或 `~/.config` 里撒任何东西。第一次运行时它在你解压出来的那个文件夹里建一个 `data/`，从此那个文件夹就是整个「安装」。
+
+```
+photo-locator/            你解压出来的文件夹
+├─ photo-locator(.exe)
+└─ data/                  第一次运行时创建
+   ├─ config.json         你在设置卡里填的 API Key——明文
+   ├─ history.json        最近 20 次分析
+   └─ shots/              照片本身
+```
+
+- **删掉这个文件夹就是完整的卸载**——API Key、你分析过的每一张照片、整份历史都跟着一起没。这个布局就是为此选的：「解开就能用」理应对应「删掉就没了」。唯一的例外：如果程序当初改存到了用户目录（见本列表最后一条），数据在那边——每次启动控制台都会印出实际位置。
+- **同一句话反过来读就是警告**：这个文件夹里有一把明文 API Key 和别人的照片。别把它解压到会同步上云的目录里，别再打包发给别人，别把整个文件夹随手交出去。「服务端存了什么」那一节一字不改地适用。
+- **`RIL_DATA_DIR` 依然优先。** 设了它，数据就去那儿——想让几份构建共用一个数据目录，或者想把数据挪出同步盘而不挪动程序本身，就用它。
+- **「放在程序旁边」会弄丢数据的场合，程序会主动换地方。** 三种情况会改存到你系统的用户目录（`%LOCALAPPDATA%\photo-locator`、`~/Library/Application Support/photo-locator` 或 `~/.local/share/photo-locator`），并在控制台里说明并印出路径：解压进了一个你没有写权限的目录（`C:\Program Files`）；从临时目录里直接运行（在 zip 预览窗口里直接双击 `.exe`——Windows 会把它解到 `%TEMP%` 下，之后连目录一起清掉）；以及将来如果发过 macOS `.app` 包的话，包内运行的情况。
+
+### 校验下载的文件（checksums）
+
+每个 release 都带一个 `SHA256SUMS.txt`，里面是每个压缩包的 SHA-256。解压之前先和你真正下到磁盘上的那份对一下：
+
+```powershell
+Get-FileHash .\photo-locator-*-windows-x64.zip -Algorithm SHA256   # Windows PowerShell
+```
+
+```bash
+shasum -a 256 photo-locator-*-macos-*.zip          # macOS
+sha256sum -c SHA256SUMS.txt --ignore-missing       # Linux —— 一次把下到的几个包全查一遍
+```
+
+**这件事证明了什么，要说清楚。** 哈希对得上，说明你手里这份和 release 页面列出的那份逐字节一致，下载被截断、被中间的代理改坏都会当场露馅。但它**不是签名**，说明不了这东西是谁造的：`SHA256SUMS.txt` 和压缩包躺在同一个页面上，能换掉其中一个的人也能换掉另一个。真正给这些二进制背书的，是它们由 GitHub Actions 在公开环境里、从打了 tag 的源码构建出来，而那份 workflow 你可以自己去读。
+
 ## 快速开始
 
 ```bash
@@ -14,7 +96,7 @@ python run.py        # macOS / Linux 上通常是 python3 run.py，Windows 上�
 
 浏览器会自己打开 <http://127.0.0.1:8000/>。`run.py` 只用标准库，第一次跑会自建 `.venv`、装好 `requirements.txt` 里那 7 个依赖、再用正确的参数启动服务；之后每次都会先确认一遍环境还完好，确认这件事实测 0.029 秒，不会重跑 pip。需要 **Python 3.11 或更新**（`app/store.py` 用了 3.11 才有的 `datetime.UTC`），版本不够它会直接告诉你。端口被占就 `python run.py --port 8010`。不想自动开浏览器就加 `--no-browser`。
 
-也可以直接下 Release 的压缩包，解开整包之后同样是 `python run.py`（要解**整包**，只挑几个文件出来它会告诉你缺文件）。
+不想用 git？任何一个 release 的资产列表最下面都有 **`Source code (zip)`**，那就是同一份源码树，解开之后同样是 `python run.py`（要解**整包**，只挑几个文件出来它会告诉你缺文件）。注意它不是上面那个开箱即用的构建：这一份是源码，仍然需要 Python。
 
 ### 前置条件
 
@@ -97,9 +179,9 @@ python run.py        # macOS / Linux 上通常是 python3 run.py，Windows 上�
 
 提示词另外要求模型自报的 `radius_km` 与 precision 相称（locality 1–5、city 10–50、region 100–400、country 几百到两千公里），上表只是后端兜底的硬下限。前端按最终 precision 决定标题显示哪一级，并在只到国家或只到一级行政区时明说"证据只支撑到……"。
 
-## 启动的三种方式
+## 启动的四种方式
 
-「快速开始」里的 `python run.py` 就是下面第一种。三种起的是同一个应用，选一个就行。
+第一种是「下载即用」那一节里的开箱即用构建——什么都不用装，这里不再重复。下面这三种都需要 Python 或 Docker，起的是同一个应用，选一个就行；「快速开始」里的 `python run.py` 就是其中第一种。
 
 ### `python run.py`（推荐）
 
@@ -138,9 +220,13 @@ uvicorn app.main:app --no-proxy-headers --reload
 
 ### 用 Docker 启动
 
+不需要源码——每个发布 tag 都会自动构建一个多架构镜像（amd64 + arm64）发到 GitHub Container Registry：
+
 ```bash
-docker compose up --build
+docker run -d --name photo-locator -p 127.0.0.1:8000:8000 -v photo-locator-data:/data ghcr.io/beluga-t/photo-locator:latest
 ```
+
+端口前面的 `127.0.0.1:` 不要去掉——去掉就绑到了所有网卡上，而这个应用没有任何鉴权。有源码的话，`docker compose up --build` 构建并运行同一个东西，且下面那套加固全部生效。
 
 同样是 <http://127.0.0.1:8000>，密钥同样是在页面里填的——它会写进下面那个命名卷，活得过容器重建。想改用 `.env` 也行（`cp .env.example .env`，然后 `docker compose up -d --force-recreate`，不用重建镜像）。
 

@@ -21,7 +21,6 @@ import logging
 import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, Request, UploadFile
@@ -31,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import CLAUDE, load_settings
 from .imaging import ImageError, prepare
 from .overrides import OverrideError, apply_overrides, mask
+from .paths import FROZEN, resource
 from .providers import LocateError, locate, locate_stream
 from .store import CONFIG_FIELDS, Store
 from .verify import verify
@@ -40,7 +40,11 @@ log = logging.getLogger("locator")
 
 store = Store()
 settings = load_settings(store.read_config())
-WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
+# Not derived from __file__: in a packaged build this module lives inside the
+# PyInstaller bundle and web/ is unpacked somewhere else entirely, so the mount
+# at the bottom of this file would serve a directory that does not exist. In a
+# source checkout resource() returns the same <project>/web it always did.
+WEB_ROOT = resource("web")
 
 
 def _reload_settings() -> None:
@@ -529,6 +533,14 @@ app.mount("/", StaticFiles(directory=WEB_ROOT, html=True), name="web")
 
 @app.on_event("startup")
 async def announce() -> None:
+    # Where the key the user pastes and every photo they analyse actually land.
+    # app/paths.py logs the same thing when it works it out, but that happens
+    # while app.store is being imported — which is before the basicConfig call
+    # at the top of this module has given the root logger a handler, so the
+    # line goes nowhere. In a packaged build, where the directory is next to an
+    # executable the user double-clicked rather than under a folder they cloned,
+    # this is the only place that answers "where is my config?".
+    log.info("Data directory %s", store.root)
     if settings.mapbox_token.startswith("sk."):
         log.warning(
             "MAPBOX_TOKEN looks like a secret token (sk.*) — it is withheld from "
@@ -536,11 +548,19 @@ async def announce() -> None:
         )
     if not settings.configured:
         missing = "ANTHROPIC_API_KEY" if settings.provider == CLAUDE else "OPENAI_BASE_URL / OPENAI_API_KEY"
-        log.warning(
-            "Model provider not configured — open the settings sheet in the "
-            "page (top right) and paste your key there, or set %s in .env",
-            missing,
-        )
+        if FROZEN:
+            # The packaged build has no .env next to it and its user has never
+            # heard of one — the settings sheet is the whole configuration story.
+            log.warning(
+                "Model provider not configured — open the settings sheet in the "
+                "page (top right) and paste your key there."
+            )
+        else:
+            log.warning(
+                "Model provider not configured — open the settings sheet in the "
+                "page (top right) and paste your key there, or set %s in .env",
+                missing,
+            )
     else:
         log.info("Provider %s  model %s", settings.provider, settings.model)
     log.info(
@@ -548,11 +568,16 @@ async def announce() -> None:
         settings.requests_per_hour or "off",
         ", ".join(sorted(settings.trusted_proxies)) or "nobody",
     )
-    if settings.requests_per_hour > 0 and not settings.trusted_proxies:
+    if settings.requests_per_hour > 0 and not settings.trusted_proxies and not FROZEN:
         # uvicorn's own --proxy-headers is on by default and rewrites the client
         # address from X-Forwarded-For for peers it trusts, which happens before
         # this app sees the request. Left on, a caller can vary that header and
         # mint a fresh rate-limit bucket per value.
+        #
+        # Suppressed when FROZEN: launch.py hard-codes proxy_headers=False, the
+        # executable has no such flag to pass, and this hedge was the last line
+        # a double-click user read before the app opened — a security warning
+        # containing an impossible instruction.
         log.warning(
             "If this was not started with --no-proxy-headers, uvicorn trusts "
             "X-Forwarded-For from loopback and the per-IP rate limit can be "

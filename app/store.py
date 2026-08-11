@@ -6,7 +6,8 @@ analysed photo existed only for the length of one request. This module is the
 other choice: the settings sheet writes to a file on the machine running the
 server, and every analysed photo is kept alongside its answer.
 
-    <RIL_DATA_DIR or ./data>/
+    <RIL_DATA_DIR, else ./data in a checkout and a data/ next to the
+     executable in a packaged build — app/paths.py decides and says so>/
         config.json        the UI-entered overrides — CONTAINS API KEYS
         history.json       one entry per analysed photo, newest last
         shots/<id>.<ext>   the image bytes, one file each
@@ -46,14 +47,26 @@ from pathlib import Path
 from typing import Any
 
 from .overrides import MAX_VALUE_LEN, mask, safe_url
+from .paths import DATA_DIR_ENV, data_dir
 
 log = logging.getLogger("locator.store")
 
-# <project>/data — app/store.py -> app -> project root. Sits next to .env, which
-# is the right mental model: same machine, same trust boundary, same secrets.
-DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-
-DATA_DIR_ENV = "RIL_DATA_DIR"
+# <project>/data in a source checkout — app/store.py -> app -> project root.
+# Sits next to .env, which is the right mental model: same machine, same trust
+# boundary, same secrets.
+#
+# Not `Path(__file__).parent.parent / "data"` any more, and that is not a
+# refactor. In a PyInstaller build app/ lives inside the bundle, and under
+# onefile the bundle is a temporary directory the process DELETES on the way
+# out — so a data directory derived from __file__ there would take the user's
+# API key and their whole history with it on every quit. app/paths.py picks a
+# directory that survives instead (next to the executable), still honours
+# RIL_DATA_DIR before anything else, and logs what it chose.
+#
+# DATA_DIR_ENV ("RIL_DATA_DIR") is imported from there for the same reason: two
+# modules answering path questions must agree on the spelling. It is still
+# importable from app.store, as it always was.
+DEFAULT_DATA_DIR = data_dir()
 
 # How many analysed photos to keep. This is a disk budget, not a preference:
 # each entry is a whole image, and an unbounded history fills the volume the
@@ -161,8 +174,11 @@ class Store:
     """
 
     def __init__(self, root: Path | str | None = None) -> None:
-        # Explicit argument > environment > <project>/data. The environment hook
-        # is what makes a container's bind mount work without a code change.
+        # Explicit argument > environment > DEFAULT_DATA_DIR. The environment
+        # hook is what makes a container's bind mount work without a code
+        # change; DEFAULT_DATA_DIR has already read the same variable, so the
+        # two agree — the check below is what makes the fallback safe when the
+        # variable is set to something the OS cannot express.
         chosen = root if root is not None else (os.getenv(DATA_DIR_ENV) or "").strip()
         try:
             candidate = Path(chosen).expanduser() if chosen else DEFAULT_DATA_DIR

@@ -14,6 +14,12 @@ data/
 .venv/
 venv/
 
+# PyInstaller output. The Dockerfile only COPYs app/ and web/, so nothing
+# stale is baked in either way — excluding these just keeps a local desktop
+# build from shipping hundreds of megabytes of dead context to the daemon.
+build/
+dist/
+
 __pycache__/
 *.py[cod]
 

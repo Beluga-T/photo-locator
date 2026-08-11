@@ -4,6 +4,88 @@ English | [简体中文](README.zh-CN.md)
 
 Upload a photo and a vision model infers where on Earth it was taken from the **picture alone** (EXIF is stripped before anything reaches the model), returning coordinates, a confidence radius, and a full "observation → implication" evidence chain.
 
+## Download and run (no Python needed)
+
+**This is the easiest way in, and the only one that asks you to install nothing.** Open the [Releases page](https://github.com/Beluga-T/photo-locator/releases/latest), expand **Assets**, take the archive for your operating system, unpack it, run the program inside. Your browser opens by itself — normally at <http://127.0.0.1:8000/>, but if port 8000 is already taken the app quietly moves to the next free one, so **the address printed in the console window is the authoritative one**. To pin a port or skip the browser, start it from a terminal: `photo-locator --port 8010`, `photo-locator --no-browser`.
+
+Two facts hold for every one of these builds, and they belong here rather than in a footnote:
+
+- **They are unsigned.** There is no Apple Developer certificate and no Windows code-signing certificate behind them — those are paid, per-year, per-identity things, and this is a free MIT project. So the first launch gets stopped by your operating system with a message that sounds like an accusation. The per-platform steps below say exactly what it will say and exactly which button gets past it. **A warning nobody prepared you for reads as malware**; this one is expected and you should be able to recognize it as such.
+- **You still bring your own Anthropic API key.** Nothing is bundled, nothing is billed to anyone else: start the app, click the gear at the top right, paste your key, "Save & apply". Everything in [Where the API key comes from, and what a run costs](#where-the-api-key-comes-from-and-what-a-run-costs) applies unchanged.
+
+The build binds `127.0.0.1` like every other way of running this, and **none of its endpoints have any authentication** — read [Security boundary](#security-boundary) before you go looking for a way to expose it.
+
+### Which download do I want?
+
+| You want to | Take | You need installed |
+| --- | --- | --- |
+| Just use the app | the ready-to-run build for your OS — this section | nothing |
+| Read, change or develop the code | the source, then `python run.py` — [Quick start](#quick-start) | Python 3.11+ |
+| Run it on a server, NAS or homelab | the container image — [Docker](#docker) | Docker |
+
+### Windows
+
+1. Download the asset whose name contains `windows` — a `.zip` named like `photo-locator-<version>-windows-x64.zip`.
+2. **Unpack it first.** Right-click → "Extract All…". Do **not** double-click the `.exe` while you are still looking inside the zip window: Windows will cheerfully run it out of a temporary folder that it deletes later, and your saved API key and history go with that folder.
+3. Double-click `photo-locator.exe` in the extracted folder.
+4. A blue full-screen box appears: **"Windows protected your PC"**, and the only button offered is "Don't run". That is SmartScreen reacting to an executable that carries no code signature and that it has not seen before — it is a reputation check, not a virus report, and nothing was scanned. Click **More info**, then **Run anyway**. It asks once per build.
+
+A console window stays open for as long as the app runs; closing it stops the server. Put the extracted folder somewhere you can write to — `Documents`, `D:\`, anywhere of your own — and **not** in `C:\Program Files`, which needs administrator rights to write into and this app writes right next to itself (see below).
+
+### macOS
+
+1. Download the asset whose name contains `macos` and unpack it — double-clicking the `.zip` in Finder is enough. If two are listed, `arm64` is Apple Silicon (M1 and later) and `x64` is Intel.
+2. **Do not double-click it the first time.** Because the build is unsigned and unnotarized, Gatekeeper refuses flatly and offers you "Move to Trash" — there is no "open anyway" button on that dialog. Instead **right-click (or Control-click) `photo-locator` → Open**, then **Open** again in the dialog that follows. That second dialog is the point of the whole maneuver: it carries an "Open" button that a double-click never shows you. Once done, macOS remembers this file and later launches are ordinary.
+3. **On macOS 15 Sequoia and newer, Apple removed that right-click bypass.** There the first launch is blocked however you start it; go to **System Settings → Privacy & Security**, scroll to the bottom, and press **Open Anyway** next to the line naming `photo-locator`. Same one-time consent, different place to give it.
+
+Prefer one line in a terminal? `xattr -d com.apple.quarantine ./photo-locator`, run once inside the unpacked folder, removes the quarantine attribute that triggers all of the above, after which a plain double-click works. It is exactly equivalent — the only difference is that it needs Terminal, and the right-click route does not.
+
+### Linux
+
+```bash
+tar -xzf photo-locator-*-linux-x64.tar.gz
+cd photo-locator-*/
+chmod +x photo-locator
+./photo-locator
+```
+
+`tar` normally preserves the executable bit, so `chmod +x` is usually redundant — run it anyway if `./photo-locator` answers `Permission denied`. There is no Gatekeeper/SmartScreen equivalent here; the file simply runs.
+
+> **glibc floor: 2.39** — roughly Ubuntu 24.04+, Debian 13+, Fedora 40+. The binary is dynamically linked against the glibc of the CI image that built it (`ubuntu-24.04`), and glibc is only forward-compatible: on an older distribution it fails with `/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found`. Below the floor, use [`python run.py`](#quick-start) or [Docker](#docker) instead — both are indifferent to it.
+
+### Where your data lives
+
+**Next to the executable.** The build is deliberately *portable*: it does not scatter anything into the registry, `%APPDATA%`, `~/Library` or `~/.config`. On first run it creates `data/` in the folder you unpacked, and that folder is then the entire installation.
+
+```
+photo-locator/            the folder you unpacked
+├─ photo-locator(.exe)
+└─ data/                  created on first run
+   ├─ config.json         the API key you typed into the settings sheet — plaintext
+   ├─ history.json        the last 20 analyses
+   └─ shots/              the photos themselves
+```
+
+- **Deleting that folder is the complete uninstall** — it takes the API key, every photo you analyzed and the whole history with it. That is the reason for this layout: "unpack and run" should imply "delete and it's gone". The one exception: if the app had to divert to the per-user directory (last bullet in this list), the data is there instead — the console tells you where on every start.
+- **Read that same sentence backwards and it is the warning**: this folder holds a plaintext API key and people's photos. Don't unpack it into a cloud-synced directory, don't zip it back up and pass it around, don't hand the folder to someone else. [What the server stores: `data/`](#what-the-server-stores-data) applies verbatim.
+- **`RIL_DATA_DIR` still wins.** Set it and the data goes there instead — how you keep one data directory across several copies of the build, or move it off a synced drive without moving the app.
+- **When "next to the executable" would lose your data, the app declines.** Three cases divert to your platform's per-user directory instead (`%LOCALAPPDATA%\photo-locator`, `~/Library/Application Support/photo-locator`, or `~/.local/share/photo-locator`), and the console says so and names the path: an unpack into a folder you cannot write to (`C:\Program Files`), a run from inside a temporary folder (double-clicking the `.exe` in the zip-preview window — Windows extracts it under `%TEMP%` and later wipes it), and a macOS `.app` bundle if one is ever shipped.
+
+### Checking the download (checksums)
+
+Every release carries a `SHA256SUMS.txt` listing the SHA-256 of each archive. Compare it against what actually landed on your disk before unpacking:
+
+```powershell
+Get-FileHash .\photo-locator-*-windows-x64.zip -Algorithm SHA256   # Windows PowerShell
+```
+
+```bash
+shasum -a 256 photo-locator-*-macos-*.zip          # macOS
+sha256sum -c SHA256SUMS.txt --ignore-missing       # Linux — checks every archive you downloaded at once
+```
+
+**Be clear about what this proves.** Matching hashes mean your copy is byte-for-byte the file the release page lists, so a truncated download or a mangling proxy shows up immediately. It is **not** a signature and does not tell you who built the thing: `SHA256SUMS.txt` sits on the same page as the archives, and whoever could swap one could swap the other. What actually stands behind these binaries is that GitHub Actions built them in public from the tagged source, and that you can go read that workflow.
+
 ## Quick start
 
 ```bash
@@ -14,7 +96,7 @@ python run.py        # usually python3 run.py on macOS / Linux; py -3 run.py als
 
 Your browser opens <http://127.0.0.1:8000/> by itself. `run.py` uses only the standard library; on first run it builds `.venv`, installs the 7 dependencies from `requirements.txt`, and starts the server with the right flags. Every later run re-checks that the environment is still intact — that check measures at 0.029 seconds and never re-runs pip. It needs **Python 3.11 or newer** (`app/store.py` uses `datetime.UTC`, which is new in 3.11) and tells you plainly if yours is too old. Port taken? `python run.py --port 8010`. Don't want the browser opened? `--no-browser`.
 
-You can also download a Release archive and unpack it — then it's the same `python run.py`. Unpack the **whole** archive; cherry-picking a few files makes it tell you what's missing.
+Don't want to use git? On any release, the **`Source code (zip)`** asset at the bottom of the assets list is this same tree — unpack it and it's the same `python run.py`. Unpack the **whole** archive; cherry-picking a few files makes it tell you what's missing. (That is not the ready-to-run build above: this one is the source and still needs Python.)
 
 ### Prerequisites
 
@@ -97,9 +179,9 @@ This is the most important behavior in the project right now, pinned down by `ap
 
 The prompt separately asks the model to self-report a `radius_km` commensurate with the precision (locality 1–5, city 10–50, region 100–400, country several hundred to two thousand km); the table above is only the backend's hard floor. The frontend picks the headline level from the final precision and, when it only reaches country or first-level region, says so: "the evidence only supports …".
 
-## Three ways to run it
+## Four ways to run it
 
-The `python run.py` from [Quick start](#quick-start) is the first one below. All three start the same app; pick one.
+The first is the ready-to-run build from [Download and run](#download-and-run-no-python-needed) — nothing to install, and it is not repeated here. The three below all need Python or Docker and all start the same app; pick one. The `python run.py` from [Quick start](#quick-start) is the first of them.
 
 ### `python run.py` (recommended)
 
@@ -138,11 +220,15 @@ The key still goes into the web page; `.env` is optional — if you want one, `c
 
 ### Docker
 
+No source checkout needed — a prebuilt multi-arch image (amd64 + arm64) is published to GitHub Container Registry from every release tag:
+
 ```bash
-docker compose up --build
+docker run -d --name photo-locator -p 127.0.0.1:8000:8000 -v photo-locator-data:/data ghcr.io/beluga-t/photo-locator:latest
 ```
 
-Same <http://127.0.0.1:8000>, and the key is still entered in the page — it is written into the named volume below and outlives container rebuilds. Prefer `.env`? Also fine (`cp .env.example .env`, then `docker compose up -d --force-recreate` — no image rebuild needed).
+Keep the `127.0.0.1:` prefix on the port — dropping it binds every interface, and nothing here has authentication. From a source checkout, `docker compose up --build` builds and runs the same thing with the hardening below already applied.
+
+Either way the key is still entered in the page — it is written into the volume and outlives container rebuilds. Prefer `.env`? Also fine with compose (`cp .env.example .env`, then `docker compose up -d --force-recreate` — no image rebuild needed).
 
 `compose.yaml` freezes this project's security posture into container properties rather than README promises:
 

@@ -1,0 +1,712 @@
+# Builds the thing a stranger actually downloads: one self-contained executable
+# per platform, zipped together with instructions, attached to the Release.
+#
+# The audience is someone who has never installed Python and has never opened a
+# terminal, and that single fact drives nearly every choice below. The archive
+# carries its own bilingual README because it is the first thing they open. The
+# folder is portable -- data/ lands beside the binary, so uninstalling is
+# "delete the folder". The scary unsigned-binary dialog each OS shows is
+# explained in that README rather than left as a dead end, because an
+# unexplained "Windows protected your PC" is where a non-technical user stops.
+#
+# Triggers on v* tags, and on a manual run so the owner can rebuild without
+# cutting a tag. A manual run from a branch publishes nothing: there is no
+# release to attach to, so the archives are simply left as workflow artifacts.
+#
+# docker.yml fires on the same v* tags. The two are deliberately independent --
+# that one writes images to GHCR with packages:write, this one writes Release
+# assets with contents:write, and neither needs the other's credential.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Read-only by default. Only the publish job is granted contents:write, and
+# nothing here ever needs packages, id-token, issues or anything else -- so a
+# compromised build-time dependency running on the matrix cannot reach the repo.
+permissions:
+  contents: read
+
+# Two runs racing on the same tag would fight over the same asset names.
+# Not cancel-in-progress: a half-uploaded release is worse than a slow one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The floor is 3.11 -- app/store.py does `from datetime import UTC`, which
+  # does not exist before then (run.py:41 explains it at length). 3.13 is the
+  # pick rather than the floor because nothing about a frozen build benefits
+  # from an older interpreter: the user never supplies Python, so the only
+  # things that matter are wheel coverage (every runtime dep ships cp313 wheels
+  # for all three platforms), PyInstaller support (6.x supports 3.8-3.15), and
+  # how long upstream keeps fixing security bugs in what we shipped -- 3.13 is
+  # supported into 2029, 3.11 only into 2027.
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  build:
+    name: build ${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # One platform failing must not cancel the other two: their logs are what
+      # tell you whether the breakage is platform-specific. Nothing gets
+      # published either way, because publish needs *all* of build to succeed.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            slug: windows-x64
+            expect_arch: X64
+
+          - os: macos-latest
+            slug: macos-arm64
+            expect_arch: ARM64
+
+          # Pinned rather than ubuntu-latest, and this is the one pin that
+          # genuinely matters. A PyInstaller binary cannot start on a glibc
+          # older than the one it was linked against, so the runner image *is*
+          # the minimum supported distro. 24.04 ships glibc 2.39, which means
+          # Ubuntu 24.04+, Debian 13+, Fedora 40+, RHEL/Rocky/Alma 10+. Left as
+          # ubuntu-latest, GitHub flipping that alias to 26.04 would silently
+          # drop everyone still on 24.04 without a line of this file changing.
+          #
+          # 22.04 (glibc 2.35) would reach back to Debian 12 and Ubuntu 22.04,
+          # but GitHub starts brownouts on that image 2026-09-17 and removes it
+          # 2027-04-17, so pinning it would buy a few months and then break.
+          # Reaching older than that needs a manylinux container, not a runner.
+          - os: ubuntu-24.04
+            slug: linux-x64
+            expect_arch: X64
+
+          # Intel Macs get their own build: an arm64 binary cannot run on them
+          # at all -- Rosetta 2 only translates x86_64 -> arm64, never the
+          # other way. macos-15-intel is the last Intel image GitHub will offer
+          # (removed Fall 2027); when it goes, so does this entry, and the
+          # README's macOS section then needs an "Apple Silicon only" note.
+          - os: macos-15-intel
+            slug: macos-x64
+            expect_arch: X64
+
+    # Git Bash exists on the Windows runner, so one shell covers all three
+    # platforms and the per-OS branching stays confined to the few steps that
+    # genuinely differ (making the archive). Written for bash 3.2, because
+    # that is what /bin/bash still is on macOS -- no mapfile, no associative
+    # arrays.
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # A mislabelled download is worse than a missing one: someone on an Intel
+      # Mac who downloads a file named -arm64 at least knows to look elsewhere,
+      # but a file named -arm64 that is secretly x86_64 wastes their afternoon.
+      # RUNNER_ARCH is set by the runner itself, so this catches GitHub quietly
+      # repointing a -latest alias at different silicon.
+      - name: Check the runner is the architecture this job claims to build
+        run: |
+          set -eo pipefail
+          if [ "$RUNNER_ARCH" != "${{ matrix.expect_arch }}" ]; then
+            echo "::error::${{ matrix.os }} reports RUNNER_ARCH=$RUNNER_ARCH, but this job labels its output '${{ matrix.slug }}' (expected ${{ matrix.expect_arch }}). Fix the matrix rather than shipping a mislabelled binary."
+            exit 1
+          fi
+          echo "$RUNNER_ARCH on ${{ matrix.os }} -> ${{ matrix.slug }}"
+
+      # These two files are the build recipe and they live outside this
+      # workflow. Checking for them here turns "pip: no such file" or a
+      # PyInstaller usage dump into a sentence that names the missing file.
+      - name: Check the build inputs exist
+        run: |
+          set -eo pipefail
+          missing=""
+          for f in requirements.txt requirements-build.txt photo-locator.spec; do
+            [ -f "$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing build input(s):$missing -- this workflow builds from photo-locator.spec and installs requirements.txt + requirements-build.txt (PyInstaller lives in the latter, deliberately kept out of the runtime requirements)."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          set -eo pipefail
+          python -m pip install --upgrade pip
+          # Runtime deps too, not just PyInstaller: PyInstaller freezes what it
+          # can import, so anything missing here is missing from the binary.
+          python -m pip install -r requirements.txt -r requirements-build.txt
+          python -m pip list
+
+      - name: Build
+        run: |
+          set -eo pipefail
+          # Module form, not the console script: it runs on the exact
+          # interpreter setup-python pinned, with no PATH resolution in
+          # between, and it is the same command the spec's header documents.
+          python -m PyInstaller --clean --noconfirm photo-locator.spec
+
+      # Work out the release name once, here, and hand it to every later step
+      # through the environment -- including the PowerShell one, which is why
+      # this goes through GITHUB_ENV rather than a step output.
+      - name: Name this build
+        run: |
+          set -eo pipefail
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            # A manual run off a branch is not a release and must not look like
+            # one sitting in someone's Downloads folder a month later.
+            version="dev-$(git rev-parse --short HEAD)"
+          fi
+          stage_name="photo-locator-$version-${{ matrix.slug }}"
+          case "${{ matrix.slug }}" in
+            linux-*) archive_name="$stage_name.tar.gz" ;;
+            *)       archive_name="$stage_name.zip" ;;
+          esac
+          {
+            echo "VERSION=$version"
+            echo "STAGE_NAME=$stage_name"
+            echo "ARCHIVE_NAME=$archive_name"
+            echo "ARCHIVE_PATH=out/$archive_name"
+          } >> "$GITHUB_ENV"
+          echo "Building $archive_name"
+
+      # photo-locator.spec is maintained separately from this file, so this
+      # finds the payload by shape rather than by a hardcoded filename: the
+      # spec can rename the executable, or switch between onefile and onedir,
+      # without silently producing an empty archive here.
+      - name: Find what PyInstaller produced
+        run: |
+          set -eo pipefail
+          shopt -s nullglob
+
+          if [ ! -d dist ]; then
+            echo "::error::PyInstaller exited successfully but produced no dist/ directory. Check photo-locator.spec."
+            exit 1
+          fi
+
+          echo "dist/ contains:"
+          ls -la dist
+
+          payload=""
+
+          # A .app bundle wins on macOS when the spec built one: it is what a
+          # Mac user expects to double-click, it carries the icon and the name,
+          # and Finder treats a bare Unix executable as a second-class citizen.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            apps=(dist/*.app)
+            if [ ${#apps[@]} -gt 0 ]; then
+              payload="${apps[0]}"
+            fi
+          fi
+
+          # Otherwise: one entry in dist/ is unambiguous, whatever it is called
+          # and whether it is the onefile binary or an onedir folder.
+          if [ -z "$payload" ]; then
+            entries=(dist/*)
+            if [ ${#entries[@]} -eq 0 ]; then
+              echo "::error::dist/ is empty -- PyInstaller built nothing. This is the check that stops an empty archive being attached to a release."
+              exit 1
+            elif [ ${#entries[@]} -eq 1 ]; then
+              payload="${entries[0]}"
+            else
+              # More than one: narrow to things that look like this app before
+              # giving up, so a stray .spec cache or a leftover does not stall
+              # a release.
+              for entry in dist/*; do
+                base="$(basename "$entry")"
+                case "$base" in
+                  photo?locator|photo?locator.exe|photo?locator.app)
+                    payload="$entry"
+                    ;;
+                esac
+              done
+              if [ -z "$payload" ]; then
+                echo "::error::dist/ holds ${#entries[@]} entries and none is recognisably the app, so this workflow will not guess which to ship. Entries: ${entries[*]}"
+                exit 1
+              fi
+            fi
+          fi
+
+          if [ ! -s "$payload" ] && [ ! -d "$payload" ]; then
+            echo "::error::Chose '$payload' but it is an empty file."
+            exit 1
+          fi
+
+          echo "PAYLOAD=$payload" >> "$GITHUB_ENV"
+          echo "Shipping: $payload"
+
+      # Everything the user unzips, assembled in one place. The archive always
+      # has a single top-level folder: unzip drops one tidy folder rather than
+      # spraying files into Downloads, and because data/ is created next to the
+      # binary, that folder ends up holding the whole installation.
+      - name: Assemble the folder the user will unzip
+        run: |
+          set -eo pipefail
+          stage="stage/$STAGE_NAME"
+          mkdir -p "$stage"
+
+          if [ -d "$PAYLOAD" ] && [ "${PAYLOAD##*.}" != "app" ]; then
+            # onedir: lift the contents up so the binary is at the top level
+            # instead of buried one folder deeper than it needs to be.
+            cp -R "$PAYLOAD/." "$stage/"
+          else
+            # onefile binary, or a .app bundle copied whole.
+            cp -R "$PAYLOAD" "$stage/"
+          fi
+
+          # MIT requires the licence text to travel with the software, and a
+          # binary is very much a copy of the software.
+          cp LICENSE "$stage/LICENSE.txt"
+
+          # cp preserves the mode, but a lost execute bit turns into "permission
+          # denied" with nothing on screen to explain it. Cheap insurance.
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            find "$stage" -maxdepth 1 -type f ! -name '*.txt' -exec chmod +x {} +
+            # `if` rather than `[ -d … ] && chmod …`: nullglob is off here, so
+            # with no .app the glob stays literal and the test fails. That is
+            # exempt from set -e as the non-final half of an && list, but only
+            # if you know that rule -- an if needs no such footnote.
+            for macos_dir in "$stage"/*.app/Contents/MacOS; do
+              if [ -d "$macos_dir" ]; then
+                chmod -R +x "$macos_dir"
+              fi
+            done
+          fi
+
+          # Read the name the user will actually double-click back off the
+          # staged folder rather than off dist/. Under onedir those differ:
+          # dist/photo-locator is a *directory*, and the thing to click is the
+          # photo-locator.exe inside it. The README says this name out loud, so
+          # getting it from the finished folder is the only way it stays true.
+          launch=""
+          for candidate in "$stage"/*.app "$stage"/photo* "$stage"/*; do
+            [ -e "$candidate" ] || continue
+            name="$(basename "$candidate")"
+            case "$name" in *.txt) continue ;; esac
+            if [ -d "$candidate" ]; then
+              case "$name" in *.app) launch="$name"; break ;; esac
+              continue
+            fi
+            launch="$name"
+            break
+          done
+          [ -n "$launch" ] || launch="photo-locator"
+          echo "LAUNCH_NAME=$launch" >> "$GITHUB_ENV"
+          echo "User launches: $launch"
+
+          ls -la "$stage"
+
+      # The archive is the first thing a stranger opens, and this project is
+      # bilingual, so this file is too -- Chinese first, matching the UI.
+      # Written per-platform on purpose: the Gatekeeper dance and the SmartScreen
+      # dance are completely different, and a combined file would make each user
+      # read past two-thirds of it to find their third.
+      - name: Write the README that ships inside the archive
+        run: |
+          set -eo pipefail
+          stage="stage/$STAGE_NAME"
+          readme="$stage/README.txt"
+
+          cat > "$readme" <<HEADER
+          ==========================================================
+            photo-locator $VERSION  (${{ matrix.slug }})
+            https://github.com/Beluga-T/photo-locator
+          ==========================================================
+
+          上传一张照片，模型只看画面本身，推断它可能是在哪里拍的。
+          不用装 Python，不用开命令行，解压就能用。
+
+          Upload a photo and a vision model works out where it was probably
+          taken, from the pixels alone. No Python to install, no terminal
+          knowledge needed: unpack this folder and run it.
+
+          HEADER
+
+          case "$RUNNER_OS" in
+            Windows)
+              cat >> "$readme" <<WINDOWS
+          ----------------------------------------------------------
+          第一步：运行 / Step 1: run it
+          ----------------------------------------------------------
+
+          双击 $LAUNCH_NAME
+
+          Windows 多半会弹出一个蓝色窗口，写着"Windows 已保护你的电脑"。
+          这不是说它是病毒 —— 只是这个程序没有买代码签名证书（一年好几百美元）。
+          点窗口左边的"更多信息"，再点"仍要运行"就可以了。
+
+          然后会出现一个黑色的控制台窗口。别关它，那个窗口就是程序本身。
+
+          Double-click $LAUNCH_NAME
+
+          Windows SmartScreen will most likely show a blue "Windows protected
+          your PC" dialog. That is not a virus warning -- this build simply is
+          not code-signed. Click "More info", then "Run anyway".
+
+          A black console window opens and stays open. Leave it alone: that
+          window *is* the program.
+
+          WINDOWS
+              ;;
+            macOS)
+              cat >> "$readme" <<MACOS
+          ----------------------------------------------------------
+          第一步：运行 / Step 1: run it
+          ----------------------------------------------------------
+
+          双击 $LAUNCH_NAME
+
+          第一次打开，macOS 一定会拦下来。它会说"无法打开，因为无法验证开发者"，
+          有时候干脆说"已损坏，请移到废纸篓"。文件没有坏 —— 那是 Gatekeeper 给
+          从网上下载的文件盖的隔离标记，而这个程序没有苹果开发者签名。
+
+          两个办法，挑一个：
+            A) 在访达里按住 Control 点它（或者右键）-> 选"打开" ->
+               在弹出的对话框里再点一次"打开"。之后就能正常双击了。
+            B) 打开"终端"，输入下面这行（xattr 后面有个空格，然后把本文件夹
+               从访达直接拖进终端窗口，它会自动填好路径），回车：
+                   xattr -dr com.apple.quarantine
+
+          然后会弹出一个"终端"窗口。别关它，那个窗口就是程序本身。
+
+          Double-click $LAUNCH_NAME
+
+          macOS will block the first launch. It says the app "cannot be opened
+          because the developer cannot be verified", or sometimes that it is
+          "damaged and should be moved to the Trash". The file is not damaged:
+          that is the Gatekeeper quarantine flag on anything downloaded from the
+          web, and this build carries no Apple Developer ID signature.
+
+          Either:
+            A) In Finder, Control-click (or right-click) it, choose Open, then
+               click Open again in the dialog. It launches normally after that.
+            B) In Terminal, type the following, then drag this folder from
+               Finder into the Terminal window to fill in the path, and hit
+               return:
+                   xattr -dr com.apple.quarantine
+
+          A Terminal window opens and stays open. Leave it alone: that window
+          *is* the program.
+
+          MACOS
+              ;;
+            Linux)
+              # Report the floor from the machine that actually built the
+              # binary rather than from a number written down by hand here,
+              # which would go stale the moment the runner image changes.
+              glibc="$(ldd --version 2>/dev/null | head -n 1 | awk '{print $NF}')"
+              # This number goes into documentation a stranger will act on, so
+              # only a plausible glibc version is allowed through. If ldd's
+              # output format ever moves, fall back to the version the pinned
+              # runner ships (keep this in step with the matrix pin above) and
+              # say so in the log rather than printing nonsense into the README.
+              case "$glibc" in
+                2.[0-9]*) ;;
+                *)
+                  echo "::warning::Could not read a glibc version out of 'ldd --version' (got '$glibc'); the README will state 2.39, the version ubuntu-24.04 ships."
+                  glibc="2.39"
+                  ;;
+              esac
+              cat >> "$readme" <<LINUX
+          ----------------------------------------------------------
+          第一步：运行 / Step 1: run it
+          ----------------------------------------------------------
+
+          打开终端，cd 进这个文件夹，然后执行：
+
+              ./$LAUNCH_NAME
+
+          如果提示没有权限，先执行 chmod +x ./$LAUNCH_NAME 再试一次。
+          在文件管理器里双击通常也行，取决于你的桌面环境。
+          程序跑在这个终端里，别关它 —— 关了就等于退出。
+
+          系统要求：glibc $glibc 或更新 —— 用 ldd --version 可以查你的版本。
+          大致对应 Ubuntu 24.04+、Debian 13+、Fedora 40+、RHEL 10+。
+          比这更老的系统上这个文件根本起不来，请改用 Docker 镜像
+          ghcr.io/beluga-t/photo-locator，或者从源码跑 python run.py。
+
+          Open a terminal, cd into this folder, and run:
+
+              ./$LAUNCH_NAME
+
+          If it refuses with a permissions error, run chmod +x ./$LAUNCH_NAME
+          first. Double-clicking in a file manager usually works too, depending
+          on your desktop environment. The program runs in that terminal --
+          closing it quits the program.
+
+          Requires glibc $glibc or newer -- check yours with ldd --version.
+          That is roughly Ubuntu 24.04+, Debian 13+, Fedora 40+, RHEL 10+. On
+          anything older this binary will not start at all; use the Docker image
+          ghcr.io/beluga-t/photo-locator or run from source with python run.py.
+
+          LINUX
+              ;;
+          esac
+
+          # Shared, because launch.py behaves identically on all three: it opens
+          # a browser itself, and it takes the next free port when 8000 is busy
+          # rather than refusing to start. Telling people "open port 8000" would
+          # be wrong the moment anything else holds it -- the console prints the
+          # address it actually got, so that is what to point them at.
+          cat >> "$readme" <<PAGE
+          ----------------------------------------------------------
+          网页会自己打开 / The page opens by itself
+          ----------------------------------------------------------
+
+          程序会自动打开你的浏览器，地址一般是 http://127.0.0.1:8000
+          如果 8000 被别的程序占着，它会自动往后找一个没被占用的端口 —— 所以
+          请以控制台窗口里打印出来的那个地址为准。
+          浏览器没自动打开的话，把那一行地址复制到浏览器里就行。
+
+          想固定用某个端口、或不要自动开浏览器，可以从终端带参数启动：
+              $LAUNCH_NAME --port 8010
+              $LAUNCH_NAME --no-browser
+
+          The program opens your browser for you. The address is normally
+          http://127.0.0.1:8000 -- but if something else is already using port
+          8000 it quietly moves to the next free one, so the address printed in
+          the console window is the authoritative one. If no browser opens, copy
+          that address into one yourself.
+
+          To pin a port, or to skip opening a browser, start it from a
+          terminal with:
+              $LAUNCH_NAME --port 8010
+              $LAUNCH_NAME --no-browser
+
+          PAGE
+
+          cat >> "$readme" <<FOOTER
+          ----------------------------------------------------------
+          第二步：填你自己的 API Key / Step 2: your own API key
+          ----------------------------------------------------------
+
+          网页打开后，点右上角的齿轮图标，把你自己的 Anthropic API Key 粘进去，保存。
+          还没有 Key 的话，在这里申请：https://console.anthropic.com/
+
+          这个 Key 只存在你自己的电脑上（本文件夹里的 data/config.json）。
+          除了分析照片时发给 Anthropic，它不会去任何别的地方。
+
+          In the page, click the gear icon in the top right, paste your own
+          Anthropic API key, and save. Get one at https://console.anthropic.com/
+
+          The key is stored only on your own machine, in data/config.json inside
+          this folder. It goes nowhere except to Anthropic when a photo is
+          analysed.
+
+          ----------------------------------------------------------
+          你的东西存在哪 / Where your data lives
+          ----------------------------------------------------------
+
+          第一次运行后，本文件夹里会多出一个 data 目录，你的 Key 和分析过的照片
+          都在里面。想卸载：把整个文件夹删掉就行，系统别处没留任何东西。
+          想把数据放到别的地方：设置环境变量 RIL_DATA_DIR 指向你要的目录。
+
+          A "data" folder appears next to this file the first time you run the
+          app. It holds your key and the photos you have analysed. To uninstall,
+          delete this whole folder -- nothing was installed anywhere else. To
+          keep the data somewhere else, set the RIL_DATA_DIR environment
+          variable to the directory you want.
+
+          ----------------------------------------------------------
+          怎么关掉 / Stopping it
+          ----------------------------------------------------------
+
+          回到那个控制台窗口，按 Ctrl-C，或者直接把窗口关掉。
+          请不要用任务管理器强杀 —— 那样它来不及清理临时文件，会在系统的
+          临时目录里留下一个 _MEI 开头的文件夹（留下了也无害，删掉即可）。
+
+          Go back to the console window and press Ctrl-C, or just close it.
+          Avoid killing it from Task Manager: that skips its cleanup and
+          leaves a _MEI* folder behind in the system temp directory
+          (harmless, and safe to delete if you find one).
+
+          ----------------------------------------------------------
+          校验这个下载 / Verifying this download
+          ----------------------------------------------------------
+
+          Release 页面上有一份 SHA256SUMS.txt，可以核对你下到的压缩包有没有被动过。
+          The release page carries SHA256SUMS.txt if you want to check that the
+          archive you downloaded is byte-for-byte the one that was built here.
+
+          有问题、想提需求：https://github.com/Beluga-T/photo-locator/issues
+          Questions and bug reports: the issues page above.
+
+          FOOTER
+
+          echo "--- README.txt ---"
+          cat "$readme"
+
+      # Each platform's native archiver, because each solves a problem the
+      # others do not. ditto is Apple's own and is the only one that reliably
+      # preserves a .app bundle's symlinks and execute bits. tar keeps the
+      # execute bit on Linux, which a zip written by Python would not.
+      - name: Archive (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -eo pipefail
+          mkdir -p out
+          ditto -c -k --keepParent "stage/$STAGE_NAME" "$ARCHIVE_PATH"
+
+      - name: Archive (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -eo pipefail
+          mkdir -p out
+          tar -czf "$ARCHIVE_PATH" -C stage "$STAGE_NAME"
+
+      # Python's zipfile, not PowerShell's Compress-Archive. Compress-Archive
+      # writes backslashes as the in-archive path separator, which the ZIP
+      # spec forbids (APPNOTE 4.4.17.1): Windows Explorer copes, but anyone
+      # unzipping that file anywhere else gets flat files literally named
+      # "photo-locator-1.2.3-windows-x64\photo-locator.exe". shutil.make_archive
+      # always writes forward slashes, its (root_dir, base_dir) pair is the same
+      # shape as tar's -C above, and it runs on the interpreter this workflow
+      # already pinned instead of on whatever archiver the image ships. The
+      # execute bit zipfile cannot record does not exist on Windows anyway.
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -eo pipefail
+          mkdir -p out
+          python -c "import shutil, sys; shutil.make_archive(sys.argv[1], 'zip', 'stage', sys.argv[2])" \
+            "${ARCHIVE_PATH%.zip}" "$STAGE_NAME"
+
+      - name: Show what will be uploaded
+        run: |
+          set -eo pipefail
+          ls -la out
+          echo "### ${{ matrix.slug }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -la out >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.slug }}
+          path: ${{ env.ARCHIVE_PATH }}
+          # The build failing quietly and uploading nothing is the failure mode
+          # that would put an empty release in front of users.
+          if-no-files-found: error
+          # The payload is already a zip/gzip; asking for another pass over
+          # ~100MB buys nothing but minutes.
+          compression-level: 0
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-24.04
+
+    # The only write in the whole file, on the only job that needs it. The
+    # matrix above -- the part that runs third-party build tooling -- stays
+    # read-only.
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: incoming
+          # Flatten the three per-platform artifacts into one directory so the
+          # checksum file lists plain filenames, which is what someone running
+          # `sha256sum -c` next to their download needs.
+          merge-multiple: true
+
+      - name: Checksum every archive
+        run: |
+          set -eo pipefail
+          shopt -s nullglob
+          cd incoming
+          files=(*.zip *.tar.gz)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::The build jobs produced no archives to publish."
+            ls -la
+            exit 1
+          fi
+          # Hashed here, on one machine, rather than on each runner: one tool,
+          # one output format, and no arguing with three different hash CLIs
+          # over quoting. sha256sum's format is also the one `sha256sum -c`
+          # reads back.
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # gh rather than a third-party action: it is preinstalled on every
+      # GitHub-hosted runner, so no outside code is ever handed the
+      # contents:write token, and there is one less dependency to keep current.
+      # The tradeoff is writing the create-or-update logic by hand, which is
+      # the dozen lines below.
+      - name: Attach everything to the Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          # This job deliberately never checks the repo out -- it only needs the
+          # three archives -- so there is no git remote for gh to infer the
+          # repository from, and it would stop with "failed to determine base
+          # repo". GH_REPO tells it directly, which is cheaper than a checkout.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eo pipefail
+          shopt -s nullglob
+          cd incoming
+          assets=(*.zip *.tar.gz SHA256SUMS.txt)
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists -- replacing its assets."
+          else
+            # Anything with a hyphen in the version (v1.2.0-rc1, v2.0.0-beta)
+            # is a prerelease; a plain v1.2.0 is not.
+            prerelease=""
+            case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+            # Created as a draft, published at the end, so nobody lands on a
+            # release with no downloads on it during the minute the upload
+            # takes. --verify-tag refuses to invent a release for a tag that
+            # does not exist.
+            gh release create "$TAG" --draft --verify-tag \
+              --title "photo-locator $TAG" --generate-notes $prerelease
+          fi
+
+          gh release upload "$TAG" "${assets[@]}" --clobber
+          gh release edit "$TAG" --draft=false
+          echo "Published: $(gh release view "$TAG" --json url --jq .url)"
+
+      # A manual run off a branch has no release to attach to. That is not a
+      # failure -- rebuilding without cutting a tag is the entire point of the
+      # workflow_dispatch trigger -- so the archives just stay as artifacts on
+      # this run, and the checksums join them.
+      - name: Keep the checksums with the artifacts instead
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: SHA256SUMS
+          path: incoming/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Summarise
+        run: |
+          set -eo pipefail
+          {
+            echo "## photo-locator downloads"
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "Attached to the **$GITHUB_REF_NAME** release."
+            else
+              echo "No tag on this run, so nothing was published. The archives"
+              echo "are on the **Artifacts** panel of this page."
+            fi
+            echo
+            echo '```'
+            cat incoming/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

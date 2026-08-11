@@ -17,6 +17,13 @@ data/
 # Disposable: `python run.py --recreate-venv` makes it again.
 .venv/
 venv/
+
+# PyInstaller output from a local `python -m PyInstaller photo-locator.spec`.
+# dist/ holds a ~17 MB binary — one careless `git add -A` after a local build
+# would bake it into a public repo's history permanently. photo-locator.spec
+# itself is source and stays tracked.
+build/
+dist/
 __pycache__/
 *.py[cod]
 .DS_Store
