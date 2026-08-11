@@ -27,15 +27,15 @@
    * reproduces the original page character for character. */
   const ZH = {
     // Chrome: title, header, skip link
-    "app.title": "照片定位 · Reverse Image Location",
+    "app.title": "照片定位",
     "app.desc": "上传一张照片，模型只看画面本身，推断它拍摄于哪个国家、哪个州省、哪个城市，并给出完整的推理依据。",
     "a11y.skip": "跳到主要内容",
     "brand.name": "照片定位",
-    "brand.sub": "Reverse Image Location",
     "chip.title": "当前后端连接的模型",
     "chip.connecting": "连接中…",
     "chip.unset": "未配置",
-    "chip.nokey": "还没有配置模型密钥：点右上角设置填一个",
+    "chip.detail": "模型来源 {provider} · 模型 {model} · 思考深度 {effort}",
+    "chip.nokey": "还没有配置模型：点右上角设置选择模型来源并填好密钥",
     "chip.offline": "后端未连接",
     "chip.offline.title": "取不到 /api/config，后端可能没有启动",
     "settings.open.aria": "打开设置",
@@ -51,7 +51,7 @@
     "thesis.lede": "上传一张照片。系统会剥掉它的 EXIF 信息，只把画面交给模型，从地形、文字、路面标线、电线杆、车牌这些细节一路收敛，给出国家、州省、城市的判断，以及每一条推理依据。",
 
     // Plate & intake
-    "plate.label": "图版 / PLATE",
+    "plate.label": "图版",
     "plate.aria": "图片工作区",
     "drop.title": "把照片拖进来",
     "drop.hint": "或点击选择 · 也可以直接 Ctrl + V 粘贴",
@@ -62,7 +62,7 @@
     "run.review": "回看中",
     "run.cancel": "取消",
     "run.reset": "换一张",
-    "rail.label": "历史 / HISTORY",
+    "rail.label": "历史",
     "veil.title": "把照片放在这里",
     "veil.sub": "松手即可载入",
 
@@ -73,7 +73,7 @@
     "hints.theme": "切换主题",
 
     // Idle panel
-    "idle.label": "分析维度 / SIGNALS READ",
+    "idle.label": "分析维度",
     "idle.terrain": "地形与植被",
     "idle.terrain.d": "山形、海岸线、树种与季相，先把范围收到气候带",
     "idle.text": "文字与标识",
@@ -98,9 +98,14 @@
     "settings.tab.model": "模型",
     "settings.tab.map": "地图",
     "settings.tab.data": "数据",
-    "settings.provider.auto": "auto · 填了网关就走网关",
+    "settings.provider.label": "模型来源",
+    "settings.provider.none": "— 请选择 —",
     "settings.provider.openai": "OpenAI 兼容网关",
-    "settings.effort.label": "EFFORT · 思考深度",
+    "settings.key.label": "API 密钥",
+    "settings.model.label": "模型名",
+    "settings.base.label": "网关地址",
+    "settings.mapbox.label": "Mapbox 令牌",
+    "settings.effort.label": "思考深度",
     "settings.effort.low": "low · 最快，够用就行",
     "settings.effort.medium": "medium · 提速首选",
     "settings.effort.high": "high · Anthropic 默认",
@@ -146,7 +151,7 @@
     "settings.token.unset": "没有配置令牌，结果页使用内置示意地球，全程零外部请求。填一个公开令牌即可启用真实地图。",
     "settings.token.sk": "这是 sk. 开头的私密令牌，不能放进浏览器。请改用 pk. 开头的公开令牌。",
     "settings.token.pk": "Mapbox 公开令牌通常以 pk. 开头，请确认没有填错。",
-    "settings.model.none": "还没有可用的模型密钥。在这里填一个，它会保存在服务端，重启也还在。",
+    "settings.model.none": "还没有可用的模型配置：先在上面选择模型来源，再填好对应密钥。配置保存在服务端，重启也还在。",
     "settings.model.keysaved": "密钥来自这里保存的配置（{mask}）",
     "settings.model.keyenv": "密钥来自服务端环境变量",
     "settings.model.using": "将使用 {provider} · {model}，{where}。",
@@ -184,7 +189,7 @@
     "err.empty": "没有收到图片内容。",
     "err.too_large": "图片超过 {mb} MB，请压缩后再上传。",
     "err.bad_image": "图片无法解码或格式不支持，请换成 JPG、PNG 或 WebP。",
-    "err.not_configured": "当前模型的密钥没有配置完整，请在设置里填好。",
+    "err.not_configured": "还没有选好模型来源或密钥不完整：请在设置里选择模型来源并填好对应密钥。",
     "err.auth": "API 密钥无效或已过期。",
     "err.network": "连不上上游模型 API，请检查网络或代理。",
     "err.upstream": "上游模型服务返回了错误，请查看后端日志。",
@@ -206,7 +211,7 @@
     "act.retry": "重试",
 
     // Toasts
-    "toast.nokey": "还没有模型密钥。点右上角的设置填一个就能用。",
+    "toast.nokey": "还没有配置模型。点右上角的设置选择模型来源，填好对应密钥就能用。",
     "toast.offline": "连不上后端 /api/config，请确认服务已启动。",
     "toast.notimage": "这不是图片文件，请选择 JPG、PNG 或 WebP。",
     "toast.toolarge": "图片 {size}，超过 {max} MB 上限，请先压缩。",
@@ -215,14 +220,15 @@
     "toast.clipboard": "浏览器拒绝了剪贴板访问，请手动复制。",
     "toast.done": "{where} · 置信度 {n}/100",
 
-    // Panel labels (the decorative bilingual pairs)
-    "panel.error": "出错了 / ERROR",
-    "panel.reading": "分析中 / READING",
-    "panel.verdict": "判定 / VERDICT",
-    "panel.evidence": "证据链 / EVIDENCE",
-    "panel.alts": "备选 / ALTERNATIVES",
-    "panel.notes": "补充说明 / NOTES",
-    "panel.narrowing": "正在收敛 / NARROWING",
+    // Panel labels. The language-purity contract retired the old decorative
+    // bilingual pairs ("判定 / VERDICT"): each mode shows its own half only.
+    "panel.error": "出错了",
+    "panel.reading": "分析中",
+    "panel.verdict": "判定",
+    "panel.evidence": "证据链",
+    "panel.alts": "备选",
+    "panel.notes": "补充说明",
+    "panel.narrowing": "正在收敛",
 
     // Working-panel phase copy
     "phase.terrain": "读取地形、海岸线与植被，先把范围收进气候带……",
@@ -247,7 +253,7 @@
     "admin.country": "国家",
     "admin.region": "行政区",
     "admin.city": "城市",
-    "coords.label": "坐标 / FIX",
+    "coords.label": "坐标",
     "coords.radius": "± {km} KM 可信半径",
     "coords.copy": "复制坐标",
     "coords.copied": "坐标已复制",
@@ -303,19 +309,20 @@
     "cat.other": "其他",
   };
 
-  /* English dictionary. The design's decorative bilingual pairs flip to
-   * English-led ("VERDICT / 判定") — the Chinese stays as the accent. */
+  /* English dictionary. Language purity holds in both directions: the EN page
+   * carries no Chinese UI chrome at all — the old bilingual accent pairs
+   * ("VERDICT / 判定") render one half per language now. */
   const EN = {
     // Chrome: title, header, skip link
-    "app.title": "Reverse Image Location · 照片定位",
+    "app.title": "Reverse Image Location",
     "app.desc": "Upload a photo and a vision model infers, from the pixels alone, which country, region and city it was taken in — with the full chain of reasoning.",
     "a11y.skip": "Skip to main content",
     "brand.name": "Reverse Image Location",
-    "brand.sub": "照片定位",
     "chip.title": "The model the backend is connected to",
     "chip.connecting": "Connecting…",
     "chip.unset": "Not configured",
-    "chip.nokey": "No model key configured yet — open Settings (top right) to add one",
+    "chip.detail": "provider {provider} · model {model} · effort {effort}",
+    "chip.nokey": "No model configured yet — open Settings (top right) to choose a provider and add its key",
     "chip.offline": "Backend offline",
     "chip.offline.title": "Could not fetch /api/config — the backend may not be running",
     "settings.open.aria": "Open settings",
@@ -330,7 +337,7 @@
     "thesis.lede": "Upload a photo. The system strips its EXIF data and hands the model nothing but the picture, narrowing down from terrain, text, lane markings, utility poles and licence plates to a country, region and city — with every step of the reasoning laid out.",
 
     // Plate & intake
-    "plate.label": "PLATE / 图版",
+    "plate.label": "PLATE",
     "plate.aria": "Image workspace",
     "drop.title": "Drop a photo here",
     "drop.hint": "or click to browse · Ctrl + V pastes too",
@@ -341,7 +348,7 @@
     "run.review": "Reviewing",
     "run.cancel": "Cancel",
     "run.reset": "New photo",
-    "rail.label": "HISTORY / 历史",
+    "rail.label": "HISTORY",
     "veil.title": "Drop the photo here",
     "veil.sub": "Release to load",
 
@@ -352,7 +359,7 @@
     "hints.theme": "theme",
 
     // Idle panel
-    "idle.label": "SIGNALS READ / 分析维度",
+    "idle.label": "SIGNALS READ",
     "idle.terrain": "Terrain & vegetation",
     "idle.terrain.d": "Mountain profiles, coastlines, tree species and season — narrowing to a climate zone first",
     "idle.text": "Text & signage",
@@ -377,8 +384,13 @@
     "settings.tab.model": "Model",
     "settings.tab.map": "Map",
     "settings.tab.data": "Data",
-    "settings.provider.auto": "auto · use the gateway when one is filled in",
+    "settings.provider.label": "PROVIDER",
+    "settings.provider.none": "— choose —",
     "settings.provider.openai": "OpenAI-compatible gateway",
+    "settings.key.label": "API KEY",
+    "settings.model.label": "MODEL",
+    "settings.base.label": "BASE URL",
+    "settings.mapbox.label": "MAPBOX TOKEN",
     "settings.effort.label": "EFFORT · thinking depth",
     "settings.effort.low": "low · fastest, good enough",
     "settings.effort.medium": "medium · first pick for speed",
@@ -425,7 +437,7 @@
     "settings.token.unset": "No token configured — results use the built-in schematic globe with zero external requests. Add a public token to enable the real map.",
     "settings.token.sk": "That is a secret token (sk.) and must not go into a browser. Use a public pk. token instead.",
     "settings.token.pk": "Mapbox public tokens normally start with pk. — double-check the value.",
-    "settings.model.none": "No usable model key yet. Add one here — it is stored server-side and survives restarts.",
+    "settings.model.none": "No usable model configuration yet — choose a provider above and add its key. It is stored server-side and survives restarts.",
     "settings.model.keysaved": "the key comes from the config saved here ({mask})",
     "settings.model.keyenv": "the key comes from the server's environment variables",
     "settings.model.using": "Will use {provider} · {model}; {where}.",
@@ -461,7 +473,7 @@
     "err.empty": "No image data was received.",
     "err.too_large": "The image exceeds {mb} MB — compress it and upload again.",
     "err.bad_image": "The image could not be decoded — use a JPG, PNG or WebP.",
-    "err.not_configured": "The current provider's credentials are incomplete — fill them in under Settings.",
+    "err.not_configured": "No provider is fully set up — choose one in Settings and add its key.",
     "err.auth": "The API key is invalid or expired.",
     "err.network": "Could not reach the upstream model API — check your network or proxy.",
     "err.upstream": "The upstream model service returned an error — check the backend log.",
@@ -483,7 +495,7 @@
     "act.retry": "Retry",
 
     // Toasts
-    "toast.nokey": "No model key yet. Open Settings (top right) and add one to get going.",
+    "toast.nokey": "No model configured yet. Open Settings (top right), choose a provider and add its key to get going.",
     "toast.offline": "Could not reach the backend at /api/config — make sure the service is running.",
     "toast.notimage": "That is not an image file — pick a JPG, PNG or WebP.",
     "toast.toolarge": "The image is {size}, over the {max} MB limit — compress it first.",
@@ -492,14 +504,14 @@
     "toast.clipboard": "The browser refused clipboard access — copy it manually.",
     "toast.done": "{where} · confidence {n}/100",
 
-    // Panel labels (English-led pairs)
-    "panel.error": "ERROR / 出错了",
-    "panel.reading": "READING / 分析中",
-    "panel.verdict": "VERDICT / 判定",
-    "panel.evidence": "EVIDENCE / 证据链",
-    "panel.alts": "ALTERNATIVES / 备选",
-    "panel.notes": "NOTES / 补充说明",
-    "panel.narrowing": "NARROWING / 正在收敛",
+    // Panel labels — English half only; see the note on the zh table.
+    "panel.error": "ERROR",
+    "panel.reading": "READING",
+    "panel.verdict": "VERDICT",
+    "panel.evidence": "EVIDENCE",
+    "panel.alts": "ALTERNATIVES",
+    "panel.notes": "NOTES",
+    "panel.narrowing": "NARROWING",
 
     // Working-panel phase copy
     "phase.terrain": "Reading terrain, coastline and vegetation, narrowing to a climate zone…",
@@ -524,7 +536,7 @@
     "admin.country": "Country",
     "admin.region": "Region",
     "admin.city": "City",
-    "coords.label": "FIX / 坐标",
+    "coords.label": "FIX",
     "coords.radius": "± {km} KM confidence radius",
     "coords.copy": "Copy coordinates",
     "coords.copied": "Coordinates copied",

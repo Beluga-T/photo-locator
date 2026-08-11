@@ -27,7 +27,7 @@ from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import CLAUDE, load_settings
+from .config import CLAUDE, OPENAI, load_settings
 from .imaging import ImageError, prepare
 from .overrides import OverrideError, apply_overrides, mask
 from .paths import FROZEN, resource
@@ -231,12 +231,20 @@ async def read_config() -> dict:
     """What the server itself is holding. Never includes a model credential —
     only whether one exists, so the UI can say who is supplying it."""
     return {
-        "provider": settings.provider,
-        # Whether LLM_PROVIDER pinned that provider or "auto" merely resolved to
-        # it. The browser needs the difference to predict which provider a
-        # request will use, or the chip in the bar can contradict the backend.
+        # "" until the configuration is actually usable. The chip must never
+        # name a vendor — or a model id — the user has not effectively chosen:
+        # the anthropic_model default used to leak here on fresh installs and
+        # read as "this app runs Claude".
+        "provider": settings.provider if settings.configured else "",
+        # Whether the operator named the provider outright (stored config or
+        # LLM_PROVIDER) rather than inference resolving it. The browser needs
+        # the difference to predict which provider a request will use, or the
+        # chip in the bar can contradict the backend.
         "providerPinned": settings.provider_pinned,
-        "model": settings.model,
+        "model": settings.model if settings.configured else "",
+        # Both credential families are present but nobody picked: the UI
+        # should ask for a decision, not for yet another key.
+        "needsChoice": settings.needs_choice,
         # The server's default thinking depth. The browser may override it per
         # request; publishing it lets the settings sheet say what "follow the
         # server" actually resolves to.
@@ -547,18 +555,34 @@ async def announce() -> None:
             "the browser, so the map will not render. Use a public pk.* token."
         )
     if not settings.configured:
-        missing = "ANTHROPIC_API_KEY" if settings.provider == CLAUDE else "OPENAI_BASE_URL / OPENAI_API_KEY"
-        if FROZEN:
+        if settings.needs_choice:
+            # Credentials for both vendors and no decision: the fix is a
+            # choice, not another key, so the generic messages below would
+            # send the operator hunting for a credential they already have.
+            log.warning(
+                "Anthropic and gateway credentials are both present but no "
+                "provider is chosen — pick one in the settings sheet (top "
+                "right)%s.",
+                "" if FROZEN else ", or set LLM_PROVIDER in .env",
+            )
+        elif FROZEN:
             # The packaged build has no .env next to it and its user has never
             # heard of one — the settings sheet is the whole configuration story.
             log.warning(
                 "Model provider not configured — open the settings sheet in the "
-                "page (top right) and paste your key there."
+                "page (top right), choose a provider and paste its key there."
             )
         else:
+            if settings.provider == CLAUDE:
+                missing = "ANTHROPIC_API_KEY"
+            elif settings.provider == OPENAI:
+                missing = "OPENAI_BASE_URL / OPENAI_API_KEY"
+            else:  # no provider chosen and no credential family to infer one
+                missing = "ANTHROPIC_API_KEY or OPENAI_BASE_URL + OPENAI_API_KEY"
             log.warning(
                 "Model provider not configured — open the settings sheet in the "
-                "page (top right) and paste your key there, or set %s in .env",
+                "page (top right), choose a provider and paste its key there, "
+                "or set %s in .env",
                 missing,
             )
     else:

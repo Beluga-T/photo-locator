@@ -407,6 +407,12 @@
   opacity: 1;
   border-color: color-mix(in srgb, var(--fix) 40%, var(--line));
 }
+/* No provider resolved yet (nothing picked, no single credential family):
+   both groups stay legible and fillable, but neither carries the accent —
+   an accent border here would present a vendor as already chosen. */
+.group[data-active="open"] {
+  opacity: 1;
+}
 .group > legend {
   padding: 0 0.4rem;
   margin-left: -0.4rem;

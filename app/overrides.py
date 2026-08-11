@@ -36,7 +36,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from urllib.parse import urlparse
 
-from .config import CLAUDE, EFFORT_LEVELS, OPENAI, Settings
+from .config import CLAUDE, EFFORT_LEVELS, OPENAI, Settings, infer_provider
 
 HEADER_PREFIX = "x-ril-"
 MAX_VALUE_LEN = 500
@@ -61,7 +61,10 @@ _FIELDS: dict[str, str] = {
     "X-RIL-OpenAI-Model": "openai_model",
 }
 
-# "auto" is not a provider, it is a request to re-resolve one — see apply_overrides.
+# "auto" is not a provider, it is legacy input for "unset — infer from the
+# credentials" (see apply_overrides). Pre-0.3 clients sent it, so it stays
+# accepted, but no UI or doc offers it any more and the rejection message
+# below does not advertise it.
 _PROVIDERS = {"auto", CLAUDE, OPENAI}
 
 
@@ -194,7 +197,7 @@ def parse_overrides(headers: Mapping[str, str]) -> dict[str, str]:
         if field == "provider":
             value = value.lower()
             if value not in _PROVIDERS:
-                raise OverrideError(f"{name} 只能填 auto、claude 或 openai。")
+                raise OverrideError(f"{name} 只能填 claude 或 openai。")
         elif field == "anthropic_effort":
             value = value.lower()
             if value not in EFFORT_LEVELS:
@@ -229,20 +232,25 @@ def apply_overrides(base: Settings, headers: Mapping[str, str]) -> Settings:
 
     # Whose decision the provider is, and therefore whether it may be revisited:
     #
-    #   header said claude/openai   -> the user just chose; honour it
-    #   header said auto            -> the user asked us to work it out
-    #   no header, LLM_PROVIDER pin -> the operator chose; honour it
-    #   no header, .env was auto    -> nobody chose, and the browser may have
-    #                                  just supplied gateway credentials that
-    #                                  change the answer, so resolve again
+    #   header said claude/openai    -> the user just chose; honour it
+    #   header said auto (legacy)    -> the user asked us to infer it afresh
+    #   no header, operator pin      -> the operator chose; honour it
+    #   no header, no pin            -> nobody chose, and the browser may have
+    #                                   just supplied credentials that change
+    #                                   the answer, so infer again
     #
-    # Without the last case a user who fills in a gateway and leaves the
-    # provider on "follow the server" silently keeps hitting Claude, because
-    # load_settings already collapsed "auto" into a concrete provider at startup.
+    # Inference is never preference: it may honestly land on "" — say the
+    # browser adds a gateway on top of the server's Anthropic key, making two
+    # families with no pick — and then the request fails as not_configured with
+    # a message asking for a choice, rather than any code here assuming a
+    # vendor. Without the re-inference a user who fills in a gateway on a
+    # keyless server would silently keep hitting a provider that cannot work.
     provider = merged.provider.lower()
     explicit = provider in {CLAUDE, OPENAI} and (sent_provider or base.provider_pinned)
     if not explicit:
-        provider = OPENAI if (merged.openai_base_url and merged.openai_api_key) else CLAUDE
+        provider = infer_provider(
+            merged.anthropic_api_key, merged.openai_base_url, merged.openai_api_key
+        )
 
     # An override never converts a resolution into an operator pin.
     pinned = base.provider_pinned and not sent_provider
@@ -361,9 +369,12 @@ if __name__ == "__main__":
     assert one.mapbox_token == base.mapbox_token and one.requests_per_hour == 40
     assert base.anthropic_api_key == "sk-ant-env-key-000000"  # base never mutated
 
-    # auto + a complete OpenAI pair resolves to openai
+    # legacy "auto" still parses (compat for pre-0.3 callers), meaning "unset"
+    assert parse_overrides({"X-RIL-Provider": "AUTO"}) == {"provider": "auto"}
+
+    # legacy auto + a complete OpenAI pair on a keyless server infers openai
     auto_openai = apply_overrides(
-        base,
+        _settings(anthropic_api_key=""),
         {
             "X-RIL-Provider": "auto",
             "X-RIL-OpenAI-Base": "https://gw.example.com/v1",
@@ -373,7 +384,21 @@ if __name__ == "__main__":
     assert auto_openai.provider == OPENAI and auto_openai.configured
     assert auto_openai.model == "gpt-4o"
 
-    # auto with only half a pair falls back to claude
+    # the same headers on a server that also holds an Anthropic key leave the
+    # choice open: two usable families and nobody picked, so no vendor is
+    # assumed and the request will fail asking for a decision
+    undecided = apply_overrides(
+        base,
+        {
+            "X-RIL-Provider": "auto",
+            "X-RIL-OpenAI-Base": "https://gw.example.com/v1",
+            "X-RIL-OpenAI-Key": "sk-oai-browser",
+        },
+    )
+    assert undecided.provider == "" and not undecided.configured
+    assert undecided.needs_choice and undecided.model == ""
+
+    # auto with only half a pair infers claude — the one usable family
     auto_claude = apply_overrides(
         base, {"X-RIL-Provider": "auto", "X-RIL-OpenAI-Key": "sk-oai-browser"}
     )
@@ -390,11 +415,12 @@ if __name__ == "__main__":
     )
     assert pinned.provider == CLAUDE
 
-    # a base that was never resolved (provider unset) still lands somewhere valid
+    # a base that was never resolved (provider unset) lands wherever the one
+    # usable credential family points — and nowhere when there is none
     unset = apply_overrides(_settings(provider=""), {"X-RIL-Anthropic-Key": "sk-ant-x"})
     assert unset.provider == CLAUDE
     unset_openai = apply_overrides(
-        _settings(provider="", openai_base_url="https://gw.example.com/v1"),
+        _settings(provider="", anthropic_api_key="", openai_base_url="https://gw.example.com/v1"),
         {"X-RIL-OpenAI-Key": "sk-oai-x"},
     )
     assert unset_openai.provider == OPENAI
@@ -404,5 +430,11 @@ if __name__ == "__main__":
     assert not empty.configured
     assert apply_overrides(empty, {"X-RIL-Anthropic-Key": "sk-ant-browser"}).configured
 
-    print("apply      ", auto_openai.provider, auto_claude.provider, pinned.provider)
+    print(
+        "apply      ",
+        auto_openai.provider,
+        undecided.provider or "(undecided)",
+        auto_claude.provider,
+        pinned.provider,
+    )
     print("self-check ok")

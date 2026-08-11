@@ -339,24 +339,33 @@
   /* What to PUT. Secrets left untouched are omitted entirely rather than sent
    * blank — the server reads an empty string as "delete this key", which would
    * wipe a working credential just because the user came in to change the
-   * model name. Non-secret fields are always sent: the form shows their real
-   * values, so whatever is there is what the user means. */
+   * model name. Other fields are sent as shown, with one exception: the
+   * provider's blank placeholder means "no choice made", not "clear the stored
+   * choice", so provider only rides along once the user actually picked one. */
   function buildPatch(draft) {
     const patch = {};
     for (const [, key, secret] of MODEL_FIELDS) {
       const value = draft[key] || "";
       if (secret && !value) continue;
+      if (key === "provider" && !value) continue;
       patch[key] = value;
     }
     return patch;
   }
 
-  /** A concrete value for the selects when the server has nothing stored. */
+  /** A concrete value for the selects when the server has nothing stored.
+   *  The provider stays "" on purpose: no vendor is ever presented as chosen. */
   function selectDefault(key) {
     const server = state.serverConfig || {};
-    if (key === "provider") return "auto";
     if (key === "anthropic_effort") return String(server.effort || "medium");
     return "";
+  }
+
+  /** Legacy configs stored provider "auto"; on the wire that always meant
+   *  "unset", so the UI reads it as "no choice" too. */
+  function normProvider(value) {
+    const provider = String(value || "").toLowerCase();
+    return provider === "auto" ? "" : provider;
   }
 
   /* Paint the form from the server's masked view. Secrets do not go into the
@@ -367,7 +376,7 @@
     for (const [id, key, secret] of MODEL_FIELDS) {
       const input = $(id);
       if (!input) continue;
-      const stored = String(saved[key] || "");
+      const stored = key === "provider" ? normProvider(saved[key]) : String(saved[key] || "");
       if (secret) {
         input.value = "";
         input.placeholder = stored
@@ -379,17 +388,21 @@
     }
   }
 
-  /** Which provider the *unsaved form* would resolve to — the same rule the
-   *  backend applies, so the dimming cannot contradict what actually runs. */
+  /** Which provider the *unsaved form* would resolve to — the same inference
+   *  the backend applies, so the dimming cannot contradict what actually runs:
+   *  an explicit pick wins; otherwise exactly one credential family decides;
+   *  both present or neither resolve to "" — no vendor is ever presumed. */
   function resolveDraft(draft) {
     const server = state.serverConfig || {};
-    const chosen = draft.provider;
+    const chosen = normProvider(draft.provider);
     if (chosen === "claude" || chosen === "openai") return chosen;
     // A secret field left blank means "keep what is stored", so the server's
     // presence flags are what decide, not the empty input.
+    const hasClaude = Boolean(draft.anthropic_api_key) || server.hasAnthropicKey === true;
     const hasGateway =
       (Boolean(draft.openai_base_url) || server.hasOpenaiBase === true) &&
       (Boolean(draft.openai_api_key) || server.hasOpenaiKey === true);
+    if (hasClaude === hasGateway) return "";
     return hasGateway ? "openai" : "claude";
   }
 
@@ -404,12 +417,16 @@
     max: "settings.effortnote.max",
   };
 
-  /** Dim the provider block that is not going to be used, and explain effort. */
+  /** Dim the provider block that is not going to be used, and explain effort.
+   *  Resolved: the winning family carries the accent, the other dims.
+   *  Unresolved ("" — nothing picked, no single credential family): both stay
+   *  fully legible but neither gets the accent — two highlighted vendors
+   *  would present a choice nobody has made. */
   function updateGroups() {
     const draft = readDraft();
     const provider = resolveDraft(draft);
-    dom.groupClaude.dataset.active = String(provider === "claude");
-    dom.groupOpenai.dataset.active = String(provider === "openai");
+    dom.groupClaude.dataset.active = provider === "claude" ? "true" : provider ? "false" : "open";
+    dom.groupOpenai.dataset.active = provider === "openai" ? "true" : provider ? "false" : "open";
 
     if (!dom.effortHint) return;
     const server = state.serverConfig || {};
@@ -445,23 +462,51 @@
 
   function describeModel() {
     const server = state.serverConfig || {};
-    if (!server.configured) {
-      return t("settings.model.none");
+    const view = models.describe(server);
+    if (!view.configured) {
+      // describe() names what is actually missing — a key, half a gateway
+      // pair, or a decision between two complete credential families.
+      return view.note || t("settings.model.none");
     }
     const saved = state.saved || {};
-    const key = server.provider === "openai" ? saved.openai_api_key : saved.anthropic_api_key;
+    const key = view.provider === "openai" ? saved.openai_api_key : saved.anthropic_api_key;
     const where = key ? t("settings.model.keysaved", { mask: key }) : t("settings.model.keyenv");
-    return t("settings.model.using", { provider: server.provider, model: server.model, where });
+    return t("settings.model.using", { provider: view.provider, model: view.model || server.model, where });
   }
 
-  /** The top-bar chip names whatever will actually run. */
+  /** Both credential families saved and no explicit provider: the server
+   *  refuses to guess between them and reports unconfigured until the user
+   *  picks — the one unconfigured state a key alone cannot fix. */
+  function needsProviderChoice(config) {
+    const server = config || {};
+    if (server.configured === true) return false;
+    if (server.provider === "claude" || server.provider === "openai") return false;
+    return (
+      server.hasAnthropicKey === true &&
+      server.hasOpenaiBase === true &&
+      server.hasOpenaiKey === true
+    );
+  }
+
+  /** The top-bar chip names whatever will actually run — and only that. An
+   *  unconfigured server reads 未配置 / Not configured: falling back to
+   *  server.model here is how the Claude default model name used to leak into
+   *  the chip before any vendor had been chosen. */
   function refreshChip() {
     const server = state.serverConfig || {};
-    dom.modelName.textContent = server.model || server.provider || t("chip.unset");
-    dom.modelDot.dataset.state = server.configured ? "ok" : "off";
-    dom.modelChip.title = server.configured
-      ? `provider ${server.provider} · model ${server.model} · effort ${server.effort || "?"}`
-      : t("chip.nokey");
+    if (!server.configured) {
+      dom.modelName.textContent = t("chip.unset");
+      dom.modelDot.dataset.state = "off";
+      dom.modelChip.title = models.describe(server).note || t("chip.nokey");
+      return;
+    }
+    dom.modelName.textContent = server.model || server.provider;
+    dom.modelDot.dataset.state = "ok";
+    dom.modelChip.title = t("chip.detail", {
+      provider: server.provider,
+      model: server.model,
+      effort: server.effort || "?",
+    });
   }
 
   function describeHistory() {
@@ -563,7 +608,17 @@
 
     await loadConfig(); // the effective view changed; re-read it rather than guess
     toast("ok", t("settings.save.ok"));
-    closeSettings();
+    if (needsProviderChoice(state.serverConfig)) {
+      // The save landed, but the server now holds both credential families
+      // with no pick and will refuse to guess. Closing the sheet would bury
+      // the one action that makes the config usable — stay open and say so.
+      fillForm(state.saved);
+      updateGroups();
+      setHint(dom.modelHint, describeModel(), "warn");
+      selectTab("model");
+    } else {
+      closeSettings();
+    }
     // Redraw in place so a map or provider change shows without re-analysing —
     // but never over a stream in flight. The payload in hand is the *previous*
     // result, and rendering it would reset the draft and delete every partial
@@ -638,8 +693,10 @@
     const saved = state.saved || {};
     for (const [, key, secret] of MODEL_FIELDS) {
       const value = draft[key] || "";
+      const stored =
+        key === "provider" ? normProvider(saved[key]) : String(saved[key] || selectDefault(key));
       // A blank secret means "leave it alone", not a change.
-      if (secret ? Boolean(value) : value !== String(saved[key] || selectDefault(key))) return true;
+      if (secret ? Boolean(value) : value !== stored) return true;
     }
     return false;
   }
@@ -766,11 +823,11 @@
       applyToken();
       refreshChip();
 
-      // Only nag when nobody at all can supply a key — a browser-local one is
-      // a perfectly good answer and must not draw a warning.
+      // Nag only while nothing can run — and with the actual reason: no
+      // credentials at all, or two complete families waiting on a pick.
       const view = models.describe(config);
       if (!view.configured) {
-        toast("warn", t("toast.nokey"), 8000);
+        toast("warn", view.note || t("toast.nokey"), 8000);
       }
     } catch {
       dom.modelName.textContent = t("chip.offline");

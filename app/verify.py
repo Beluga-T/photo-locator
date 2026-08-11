@@ -135,6 +135,15 @@ async def _verify_openai(settings: Settings) -> dict:
 
 async def verify(settings: Settings) -> dict:
     """Probe the credential in `settings` without spending tokens. Never raises."""
+    # No provider, no probe. Guessing which family to test would report on a
+    # credential the user never asked about — and name a vendor nobody chose.
+    if settings.provider not in (CLAUDE, OPENAI):
+        message = (
+            "Anthropic 和网关的密钥都在，但还没有选定用哪家，请先在设置里选择模型来源。"
+            if settings.needs_choice
+            else "还没有选择模型来源，请先在设置里选择并填好对应的密钥。"
+        )
+        return _result("", "", "not_configured", message)
     try:
         return await (_verify_claude(settings) if settings.provider == CLAUDE else _verify_openai(settings))
     except Exception:  # noqa: BLE001 - the settings panel gets a verdict, never a traceback
@@ -187,6 +196,20 @@ if __name__ == "__main__":
         # A base URL that carries the credential in its path or userinfo.
         assert safe_url("https://relay.example/sk-Xk3ABCDEFGH9fQ/v1") == "https://relay.example"
         assert safe_url("https://user:pw@10.0.0.5:8080/v1") == "https://10.0.0.5:8080"
+
+        # No provider chosen: no probe, no guess, and never a vendor name in
+        # the verdict. PROBE holds both credential families, so with the
+        # provider blanked this is the ask-for-a-decision case…
+        undecided = await verify(replace(PROBE, provider="", provider_pinned=False))
+        assert undecided["code"] == "not_configured" and not undecided["ok"], undecided
+        assert undecided["provider"] == "" and undecided["model"] == "", undecided
+        assert "选" in undecided["message"], undecided
+        # …and with every credential blanked too, the plain unconfigured one.
+        bare = await verify(
+            replace(PROBE, provider="", provider_pinned=False, anthropic_api_key="", openai_api_key="")
+        )
+        assert bare["code"] == "not_configured" and bare["provider"] == "", bare
+        assert bare["message"] != undecided["message"], "the two unconfigured cases must read differently"
 
         print(f"--- redaction\n{echoed}\n{straddle}\n{upper}\n{wrapped}\n{unknown}\n")
 

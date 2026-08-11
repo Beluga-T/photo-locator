@@ -99,6 +99,27 @@ class LocateError(Exception):
         self.status = status
 
 
+def _not_configured(settings: Settings) -> LocateError:
+    """The refusal both entry points raise before any upstream call.
+
+    Two situations share the code but differ in the fix: no usable credentials
+    (add one), or credentials for both vendors with nobody having picked
+    (decide). Telling the second user to "add a key" sends them off to
+    re-paste keys they already saved, so the wording splits here.
+    """
+    if settings.needs_choice:
+        message = (
+            "Anthropic 和 OpenAI 网关的密钥都填了，但还没有选定用哪家。"
+            "点右上角的设置，选择模型来源后保存即可。"
+        )
+    else:
+        message = (
+            "还没有配置模型。点右上角的设置，先选择模型来源，"
+            "再填入对应的 API Key 保存即可，不用重启。"
+        )
+    return LocateError("not_configured", message, status=503)
+
+
 def _extract_json(text: str) -> dict:
     cleaned = FENCE.sub("", (text or "").strip())
     try:
@@ -517,11 +538,7 @@ async def locate(image: PreparedImage, settings: Settings, *, lang: str = "zh") 
     # `lang` selects the prompt text and nothing else — "en" asks for English
     # prose in the narrative fields; every other branch is language-blind.
     if not settings.configured:
-        raise LocateError(
-            "not_configured",
-            "还没有配置模型密钥。点右上角的设置，填入你自己的 API Key 保存即可，不用重启。",
-            status=503,
-        )
+        raise _not_configured(settings)
     raw = await (
         _call_claude(image, settings, lang)
         if settings.provider == CLAUDE
@@ -597,11 +614,7 @@ async def locate_stream(
     `lang` selects the prompt text and nothing else, exactly as in locate().
     """
     if not settings.configured:
-        raise LocateError(
-            "not_configured",
-            "还没有配置模型密钥。点右上角的设置，填入你自己的 API Key 保存即可，不用重启。",
-            status=503,
-        )
+        raise _not_configured(settings)
 
     if settings.provider != CLAUDE:
         yield "final", normalize(await _call_openai(image, settings, lang))
