@@ -489,18 +489,21 @@ jobs:
           第二步：填你自己的 API Key / Step 2: your own API key
           ----------------------------------------------------------
 
-          网页打开后，点右上角的齿轮图标，把你自己的 Anthropic API Key 粘进去，保存。
-          还没有 Key 的话，在这里申请：https://console.anthropic.com/
+          网页打开后，点右上角的齿轮图标，先选择一家模型来源 ——
+          Claude（Anthropic）或任意 OpenAI 兼容网关 —— 再填入你自己的 API Key，保存。
+          没有预选任何一家。Claude 的 Key 在这里申请：https://console.anthropic.com/
 
           这个 Key 只存在你自己的电脑上（本文件夹里的 data/config.json）。
-          除了分析照片时发给 Anthropic，它不会去任何别的地方。
+          除了分析照片时发给你选定的那家服务商，它不会去任何别的地方。
 
-          In the page, click the gear icon in the top right, paste your own
-          Anthropic API key, and save. Get one at https://console.anthropic.com/
+          In the page, click the gear icon in the top right, first choose a
+          provider -- Claude (Anthropic) or any OpenAI-compatible gateway --
+          then paste your own API key and save. Nothing is preselected. A
+          Claude key comes from https://console.anthropic.com/
 
           The key is stored only on your own machine, in data/config.json inside
-          this folder. It goes nowhere except to Anthropic when a photo is
-          analysed.
+          this folder. It goes nowhere except to the provider you chose when a
+          photo is analysed.
 
           ----------------------------------------------------------
           你的东西存在哪 / Where your data lives
